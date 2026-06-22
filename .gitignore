@@ -1,0 +1,15 @@
+# Local secrets
+.env
+.env.*
+*.env
+*secret*
+*secrets*
+*api_key*
+*apikey*
+gemini_key.txt
+
+# Generated outputs
+answers/
+results/*.jsonl
+__pycache__/
+*.pyc
