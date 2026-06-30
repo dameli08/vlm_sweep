@@ -220,10 +220,10 @@ build_model_args() {
   fi
 
   # Use benchmark-specific answer format policy:
-  # - MMMU and MMStar tasks are MCQ => force single-letter output
+  # - MMMU, AI2D, and MMStar tasks are MCQ => force single-letter output
   # - OCRBench is text-oriented => do not force letter output
   model_args="$(echo "${model_args}" | sed -E 's/,?force_letter_output=[^,]*//g; s/,,+/,/g; s/,$//')"
-  if [[ "${benchmark}" == *"mmmu"* || "${benchmark}" == *"mmstar"* ]]; then
+  if [[ "${benchmark}" == *"mmmu"* || "${benchmark}" == *"mmstar"* || "${benchmark}" == *"ai2d"* ]]; then
     model_args+=",force_letter_output=true"
   else
     model_args+=",force_letter_output=false"
@@ -371,7 +371,7 @@ def normalize_exact_text(text):
 
 def benchmark_match_rule(benchmark_name):
   b = (benchmark_name or "").lower()
-  if "mmmu" in b or "mmstar" in b:
+  if "mmmu" in b or "mmstar" in b or "ai2d" in b:
     return "letter"
   if "ocrbench" in b:
     return "exact_text"
@@ -581,6 +581,8 @@ answer_benchmark_key() {
   local benchmark="${1,,}"
   if [[ "${benchmark}" == *"mmmu"* ]]; then
     echo "mmmu_pro"
+  elif [[ "${benchmark}" == *"ai2d"* ]]; then
+    echo "ai2d"
   elif [[ "${benchmark}" == *"ocrbench"* ]]; then
     echo "ocrbench"
   elif [[ "${benchmark}" == *"mmstar"* ]]; then

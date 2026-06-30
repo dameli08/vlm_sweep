@@ -16,7 +16,7 @@ OUT_DIR="/home/dameli/vlm_sweep/reason_isolated_$(date +%Y%m%d_%H%M%S)"
 TASK_CANDIDATES=(
   "mmmu_pro_vision_cot_reasoning"
   "mmstar_reasoning"
-  "ocrbench_reasoning"
+  "ai2d_reasoning"
 )
 
 source ~/miniconda3/etc/profile.d/conda.sh

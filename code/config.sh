@@ -36,7 +36,7 @@ BATCH_SIZE="1"
 LIMIT=""  # keep empty for full benchmark; set e.g. 10 for smoke tests
 LOG_SAMPLES="1"
 EXPORT_CSV="0"
-RUN_NON_REASON="0"
+RUN_NON_REASON="1"
 RUN_REASON="1"
 
 # Optional mode-specific extra model args.
@@ -54,14 +54,14 @@ REASON_EXTRA_GEN_KWARGS=""
 # Non-reason run uses these IDs.
 NON_REASON_BENCHMARKS=(
   "mmmu_pro_vision"
-  "ocrbench"
+  "ai2d"
   "mmstar"
 )
 
 # Reason run uses reasoning IDs.
 REASON_BENCHMARKS=(
   "mmmu_pro_vision_cot_reasoning"
-  "ocrbench_reasoning"
+  "ai2d_reasoning"
   "mmstar_reasoning"
 )
 
@@ -115,7 +115,7 @@ RESULTS_JSONL="${RESULTS_ROOT}/all_results.jsonl"
 WORK_ROOT="/tmp/vlm_sweep_work"
 RUN_TAG="$(date +%Y%m%d_%H%M%S)"
 
-# OCRBench answer judging.
+# Reason-mode answer extraction.
 # Set GEMINI_API_KEY in your shell before running; do not store it in this repo.
 GEMINI_API_KEY="${GEMINI_API_KEY:-}"
 GEMINI_MODEL="gemini-3.1-flash-lite"

@@ -24,8 +24,8 @@ For 3 benchmarks and 2 modes, one model has `3 * 6 * 2 = 36` runs.
 ## Benchmarks
 
 Configured in [config.sh](config.sh):
-- Non-reason: `mmmu_pro_vision`, `ocrbench`, `mmstar`
-- Reason: `mmmu_pro_vision_cot_reasoning`, `ocrbench_reasoning`, `mmstar_reasoning`
+- Non-reason: `mmmu_pro_vision`, `ai2d`, `mmstar`
+- Reason: `mmmu_pro_vision_cot_reasoning`, `ai2d_reasoning`, `mmstar_reasoning`
 
 ## Do you need to manually download benchmarks?
 
@@ -50,7 +50,7 @@ Edit [config.sh](config.sh):
 - Separate non-thinking and thinking baseline values: `NON_REASON_BASELINE_*` and `REASON_BASELINE_*`
 - Fixed `TOP_K_VALUE`
 - `EXPORT_CSV="0"` to discard temporary CSV files after each run
-- `GEMINI_API_KEY` from your shell environment for OCRBench judging
+- `GEMINI_API_KEY` from your shell environment for reasoning-mode answer extraction
 - GPU/server settings if needed
 
 Your current test models are already set to:
@@ -75,6 +75,6 @@ Answer JSONL files are updated after each completed model response. Non-thinking
 - `true_answer`
 - `response`
 
-Thinking-mode rows contain the complete original generation in `thinking_process`. Gemini extracts the explicit final answer for MMMU Pro, MMStar, and OCRBench into `response`; it is not given the ground-truth answer during extraction. A missing explicit final answer produces an empty `response`, which is excluded from accuracy.
+Thinking-mode rows contain the complete original generation in `thinking_process`. Gemini extracts the explicit final answer for MMMU Pro, MMStar, and AI2D into `response`; it is not given the ground-truth answer during extraction. A missing explicit final answer produces an empty `response`, which is excluded from accuracy.
 
-The consolidated results JSONL stores one record per benchmark sweep run with the run parameters, fixed top-k value, accuracy, and valid/invalid row counts. Empty or invalid answers are excluded from the accuracy denominator. Temporary lmms-eval logs and raw outputs are written under `WORK_ROOT` from [config.sh](config.sh), currently `/tmp/vlm_sweep_work`.
+The consolidated results JSONL stores one record per benchmark sweep run with the run parameters, fixed top-k value, and accuracy. Empty or invalid answers are excluded from the accuracy denominator. Temporary lmms-eval logs and raw outputs are written under `WORK_ROOT` from [config.sh](config.sh), currently `/tmp/vlm_sweep_work`.

@@ -13,6 +13,8 @@ def benchmark_key(name):
         return "mmmu_pro"
     if "mmstar" in lower:
         return "mmstar"
+    if "ai2d" in lower:
+        return "ai2d"
     if "ocrbench" in lower:
         return "ocrbench"
     return lower
@@ -66,10 +68,11 @@ def extract_final_answer(api_key, model, benchmark, model_output, retries=3):
         raise ValueError("GEMINI_API_KEY is required for reason-mode answer extraction")
 
     key = benchmark_key(benchmark)
-    if key in {"mmmu_pro", "mmstar"}:
+    if key in {"mmmu_pro", "mmstar", "ai2d"}:
         instruction = (
             "Extract the model's intended final multiple-choice answer. "
-            "Return one uppercase letter A-J only. Do not solve the problem yourself and do not "
+            "Return one uppercase letter A-J only. If the model gives an option text instead of a letter, "
+            "return that option text exactly. Do not solve the problem yourself and do not "
             "infer an answer from option discussion. Require an explicit final selection, answer tag, "
             "or clear concluding answer. If none exists, return an empty string."
         )
@@ -118,6 +121,9 @@ def extract_final_answer(api_key, model, benchmark, model_output, retries=3):
             if key in {"mmmu_pro", "mmstar"}:
                 letter = re.search(r"\b([A-J])\b", answer.upper())
                 return letter.group(1) if letter else ""
+            if key == "ai2d":
+                letter = re.search(r"\b([A-J])\b", answer.upper())
+                return letter.group(1) if letter else answer.strip()
             return answer
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
             last_error = exc

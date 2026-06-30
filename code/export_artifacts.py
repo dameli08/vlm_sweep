@@ -98,6 +98,8 @@ def benchmark_key(name):
     lower = name.lower()
     if "mmmu" in lower:
         return "mmmu_pro"
+    if "ai2d" in lower:
+        return "ai2d"
     if "ocrbench" in lower:
         return "ocrbench"
     if "mmstar" in lower:
@@ -107,7 +109,7 @@ def benchmark_key(name):
 
 def benchmark_rule(name):
     key = benchmark_key(name)
-    if key in {"mmmu_pro", "mmstar"}:
+    if key in {"mmmu_pro", "mmstar", "ai2d"}:
         return "letter"
     if key == "ocrbench":
         return "gemini_judge"
@@ -142,6 +144,110 @@ def pick_doc_id(record):
             if key in doc:
                 return doc[key]
     return ""
+
+def pick_doc(record):
+    doc = record.get("doc") if isinstance(record, dict) else None
+    return doc if isinstance(doc, dict) else {}
+
+
+def option_letter(index):
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        return ""
+    if 0 <= index < 26:
+        return chr(ord("A") + index)
+    return ""
+
+
+def canonical_true_answer(benchmark, target, record=None):
+    target_text = to_text(target).strip()
+    if benchmark_key(benchmark) != "ai2d":
+        return target_text
+
+    doc = pick_doc(record or {})
+    options = doc.get("options")
+    answer = doc.get("answer", target)
+    if isinstance(options, (list, tuple)) and options:
+        idx = None
+        try:
+            idx = int(answer)
+        except (TypeError, ValueError):
+            answer_text = to_text(answer).strip().upper()
+            if re.fullmatch(r"[A-Z]", answer_text):
+                idx = ord(answer_text) - ord("A")
+        if idx is None:
+            try:
+                idx = int(target)
+            except (TypeError, ValueError):
+                target_letter = extract_letter(target_text)
+                if target_letter:
+                    idx = ord(target_letter) - ord("A")
+        if idx is not None and 0 <= idx < len(options):
+            return f"{chr(ord('A') + idx)}. {to_text(options[idx]).strip()}"
+
+    target_letter = option_letter(target_text)
+    if target_letter:
+        return target_letter
+    return target_text
+
+
+def ai2d_true_parts(true_answer):
+    text = to_text(true_answer).strip()
+    letter = ""
+    option_text = ""
+
+    digit_letter = option_letter(text)
+    if digit_letter:
+        letter = digit_letter
+
+    labelled = re.match(r"^\s*([A-Z])\s*[\.)\]:-]\s*(.+?)\s*$", text, flags=re.I | re.S)
+    if labelled:
+        letter = labelled.group(1).upper()
+        option_text = labelled.group(2).strip()
+    elif re.fullmatch(r"\s*[A-Z]\s*", text, flags=re.I):
+        letter = text.strip().upper()
+    elif text:
+        option_text = text
+
+    return letter, option_text
+
+
+def normalize_option_text(text):
+    norm = normalize_text(text)
+    norm = re.sub(r"^(final answer|answer|option|choice)\s*(is|:|=|-)?\s*", "", norm).strip()
+    norm = re.sub(r"^[a-z]\s*[\.)\]:-]\s*", "", norm).strip()
+    return norm
+
+def extract_mcq_letter_strict(text):
+    raw = strip_think_blocks(to_text(text)).strip()
+    patterns = [
+        r"^\s*\(?\s*([A-Z])\s*\)?\s*[\.)\]:,;!-]*\s*$",
+        r"^\s*([A-Z])\s*[\.)\]:-]\s+",
+        r"(?:final\s+answer|answer|option|choice)\s*(?:is|:|=|-)?\s*\(?\s*([A-Z])\s*\)?\s*(?:$|[\.)\],:;!])",
+        r"<answer>\s*\(?\s*([A-Z])\s*\)?\s*</answer>",
+    ]
+    for pattern in patterns:
+        hits = re.findall(pattern, raw, flags=re.I | re.S)
+        if hits:
+            return hits[-1].upper()
+    return ""
+
+
+
+def ai2d_match_status(true_answer, response):
+    true_letter, true_option = ai2d_true_parts(true_answer)
+    pred_letter = extract_mcq_letter_strict(response)
+    pred_norm = normalize_option_text(response)
+    true_option_norm = normalize_option_text(true_option)
+
+    if not pred_letter and not pred_norm:
+        return None
+    if true_letter and pred_letter:
+        return true_letter == pred_letter
+    if true_option_norm and pred_norm:
+        return true_option_norm == pred_norm or true_option_norm in pred_norm
+    return False
 
 
 def load_live_rows(out_dir, benchmark):
@@ -206,7 +312,7 @@ def collect_rows(out_dir, benchmark):
     for record in iter_sample_records(out_dir):
         doc_id = str(pick_doc_id(record))
         live = live_rows.get((benchmark, doc_id)) or live_rows.get(doc_id) or {}
-        target = to_text(pick_target(record))
+        target = canonical_true_answer(benchmark, pick_target(record), record)
         raw_prediction = to_text(pick_prediction(record))
         live_raw = to_text(live.get("raw_response_full", ""))
         source_response = live_raw or raw_prediction
@@ -235,7 +341,7 @@ def collect_rows(out_dir, benchmark):
             rows.append(
                 {
                     "doc_id": key,
-                    "true_answer": to_text(live.get("true_answer_text", "")),
+                    "true_answer": canonical_true_answer(benchmark, live.get("true_answer_text", "")),
                     "response": to_text(live.get("visible_response") or live.get("prediction_clean") or live.get("prediction_raw", "")),
                     "thinking_process": to_text(live.get("thinking_trace", "")),
                 }
@@ -305,8 +411,18 @@ def evaluate(rows, benchmark, gemini_api_key, gemini_model):
             continue
 
         if rule == "letter":
+            if benchmark_key(benchmark) == "ai2d":
+                match = ai2d_match_status(true_answer, response)
+                if match is None:
+                    invalid += 1
+                    continue
+                valid += 1
+                if match:
+                    correct += 1
+                continue
+
             true_letter = extract_letter(true_answer)
-            pred_letter = extract_letter(response)
+            pred_letter = extract_mcq_letter_strict(response)
             if not true_letter or not pred_letter:
                 invalid += 1
                 continue

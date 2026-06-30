@@ -10,5 +10,8 @@ gemini_key.txt
 
 
 
+# Generated answer files
+answers/
+
 __pycache__/
 *.pyc
