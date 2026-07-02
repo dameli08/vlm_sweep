@@ -95,11 +95,6 @@ for path in scan_files():
 print(f"[INFO] lmms-eval include repair: created={created}, unresolved={len(unresolved)}")
 PY
 
-if [[ "${RUN_REASON:-1}" == "1" && -z "${GEMINI_API_KEY:-}" ]]; then
-  echo "[ERROR] GEMINI_API_KEY must be exported before running reason-mode benchmarks."
-  exit 1
-fi
-
 if [[ ${#MODEL_PATHS[@]} -ne ${#MODEL_ALIASES[@]} ]]; then
   echo "[ERROR] MODEL_PATHS and MODEL_ALIASES must have same length."
   exit 1
@@ -220,10 +215,9 @@ build_model_args() {
   fi
 
   # Use benchmark-specific answer format policy:
-  # - MMMU, AI2D, and MMStar tasks are MCQ => force single-letter output
-  # - OCRBench is text-oriented => do not force letter output
+  # - MMMU Pro and AI2D are MCQ => force single-letter output
   model_args="$(echo "${model_args}" | sed -E 's/,?force_letter_output=[^,]*//g; s/,,+/,/g; s/,$//')"
-  if [[ "${benchmark}" == *"mmmu"* || "${benchmark}" == *"mmstar"* || "${benchmark}" == *"ai2d"* ]]; then
+  if [[ "${benchmark}" == *"mmmu"* || "${benchmark}" == *"ai2d"* ]]; then
     model_args+=",force_letter_output=true"
   else
     model_args+=",force_letter_output=false"
@@ -371,10 +365,6 @@ def normalize_exact_text(text):
 
 def benchmark_match_rule(benchmark_name):
   b = (benchmark_name or "").lower()
-  if "mmmu" in b or "mmstar" in b or "ai2d" in b:
-    return "letter"
-  if "ocrbench" in b:
-    return "exact_text"
   return "letter"
 
 def to_text(x):
@@ -574,7 +564,7 @@ export_run_artifacts() {
   local top_p="$8"
   local repetition_penalty="$9"
 
-  python "${SCRIPT_DIR}/export_artifacts.py"     --out-dir "${out_dir}"     --answers-root "${ANSWERS_ROOT}"     --results-jsonl "${RESULTS_JSONL}"     --model-name "${model_name}"     --mode "${mode}"     --benchmark "${benchmark}"     --sweep-param "${sweep_param}"     --sweep-value "${sweep_value}"     --temperature "${temperature}"     --top-p "${top_p}"     --top-k "${TOP_K_VALUE}"     --repetition-penalty "${repetition_penalty}"     --gemini-api-key "${GEMINI_API_KEY}"     --gemini-model "${GEMINI_MODEL}"
+  python "${SCRIPT_DIR}/export_artifacts.py"     --out-dir "${out_dir}"     --answers-root "${ANSWERS_ROOT}"     --results-jsonl "${RESULTS_JSONL}"     --model-name "${model_name}"     --mode "${mode}"     --benchmark "${benchmark}"     --sweep-param "${sweep_param}"     --sweep-value "${sweep_value}"     --temperature "${temperature}"     --top-p "${top_p}"     --top-k "${TOP_K_VALUE}"     --repetition-penalty "${repetition_penalty}"
 }
 
 answer_benchmark_key() {
@@ -583,10 +573,6 @@ answer_benchmark_key() {
     echo "mmmu_pro"
   elif [[ "${benchmark}" == *"ai2d"* ]]; then
     echo "ai2d"
-  elif [[ "${benchmark}" == *"ocrbench"* ]]; then
-    echo "ocrbench"
-  elif [[ "${benchmark}" == *"mmstar"* ]]; then
-    echo "mmstar"
   else
     echo "${benchmark}" | sed -E "s/[^a-z0-9]+/_/g; s/^_+|_+$//g"
   fi
@@ -658,7 +644,6 @@ CSV
     --jsonl "${live_answer_jsonl}" \
     --mode "${mode}" \
     --benchmark "${benchmark}" \
-    --gemini-model "${GEMINI_MODEL}" \
     --stop-file "${LIVE_WRITER_STOP_FILE}" &
   LIVE_WRITER_PID="$!"
 
@@ -723,6 +708,21 @@ CSV
   return 1
 }
 
+get_reason_baseline_temperature() {
+  local model_alias="$1"
+  echo "${REASON_BASELINE_TEMPERATURE_BY_MODEL[$model_alias]:-${REASON_BASELINE_TEMPERATURE}}"
+}
+
+get_reason_baseline_top_p() {
+  local model_alias="$1"
+  echo "${REASON_BASELINE_TOP_P_BY_MODEL[$model_alias]:-${REASON_BASELINE_TOP_P}}"
+}
+
+get_reason_baseline_repetition_penalty() {
+  local model_alias="$1"
+  echo "${REASON_BASELINE_REPETITION_PENALTY_BY_MODEL[$model_alias]:-${REASON_BASELINE_REPETITION_PENALTY}}"
+}
+
 run_sweeps_for_benchmark() {
   local model_alias="$1"
   local answer_model_name="$2"
@@ -737,10 +737,12 @@ run_sweeps_for_benchmark() {
     baseline_top_p="${NON_REASON_BASELINE_TOP_P}"
     baseline_repetition_penalty="${NON_REASON_BASELINE_REPETITION_PENALTY}"
   else
-    baseline_temperature="${REASON_BASELINE_TEMPERATURE}"
-    baseline_top_p="${REASON_BASELINE_TOP_P}"
-    baseline_repetition_penalty="${REASON_BASELINE_REPETITION_PENALTY}"
+    baseline_temperature="$(get_reason_baseline_temperature "${model_alias}")"
+    baseline_top_p="$(get_reason_baseline_top_p "${model_alias}")"
+    baseline_repetition_penalty="$(get_reason_baseline_repetition_penalty "${model_alias}")"
   fi
+
+  log "BASELINE ${model_alias} | ${mode} | temp=${baseline_temperature} top_p=${baseline_top_p} repetition_penalty=${baseline_repetition_penalty}"
 
   local t
   for t in "${TEMPERATURE_VALUES[@]}"; do
@@ -785,6 +787,20 @@ run_mode() {
   done
 }
 
+model_is_selected() {
+  local alias="$1"
+  if [[ ${#SELECTED_MODEL_ALIASES[@]} -eq 0 ]]; then
+    return 0
+  fi
+  local selected
+  for selected in "${SELECTED_MODEL_ALIASES[@]}"; do
+    if [[ "${alias}" == "${selected}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 main() {
   log "Results root: ${RUN_ROOT}"
 
@@ -793,6 +809,11 @@ main() {
     local model_path="${MODEL_PATHS[$i]}"
     local model_alias="${MODEL_ALIASES[$i]}"
     local answer_model_name="${ANSWER_MODEL_NAMES[$i]}"
+
+    if ! model_is_selected "${model_alias}"; then
+      log "SKIP unselected model: ${model_alias}"
+      continue
+    fi
 
     local model_root="${RUN_ROOT}/${model_alias}"
     mkdir -p "${model_root}"

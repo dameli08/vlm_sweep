@@ -1,36 +1,28 @@
-# Fresh VLM Sweep Automation (vLLM + lmms-eval)
+# VLM Sweep Automation
 
-This folder is fully new and independent. No existing files/folders were modified.
+Runs vLLM + lmms-eval sweeps and writes final artifacts under the project root.
 
-## What this runs
+## What This Runs
 
-For each model in order:
-1. Start one vLLM server for that model.
-2. Run all non-reason benchmarks with parameter sweeps.
-3. Run all reason benchmarks with parameter sweeps.
-4. Stop server and move to next model.
+For each selected model:
+1. Start one vLLM server.
+2. Run the configured benchmark sweeps.
+3. Write live answer JSONL files after each response.
+4. Append one result row per run to `results/all_results.jsonl`.
+5. Stop the server and move to the next model.
 
-Sweeps are NOT combinational:
-- Temperature sweep only
-- Top-p sweep only
-- Repetition-penalty sweep only
+Sweeps are not combinational. Each benchmark runs:
+- one temperature sweep
+- one top-p sweep
+- one repetition-penalty sweep
 
-So per benchmark, per mode:
-- `len(TEMPERATURE_VALUES) + len(TOP_P_VALUES) + len(REPETITION_PENALTY_VALUES)`
-
-With the current test values (`2 + 2 + 2`), that is `6` runs per benchmark per mode.
-For 3 benchmarks and 2 modes, one model has `3 * 6 * 2 = 36` runs.
+The final configuration is thinking-mode only by default: `RUN_NON_REASON="0"`, `RUN_REASON="1"`.
 
 ## Benchmarks
 
 Configured in [config.sh](config.sh):
-- Non-reason: `mmmu_pro_vision`, `ai2d`, `mmstar`
-- Reason: `mmmu_pro_vision_cot_reasoning`, `ai2d_reasoning`, `mmstar_reasoning`
-
-## Do you need to manually download benchmarks?
-
-Usually no.
-`lmms-eval` typically downloads required benchmark data automatically on first run.
+- Reason: `mmmu_pro_vision_cot_reasoning`, `ai2d_reasoning`
+- Non-reason entries remain available for compatibility, but are disabled by default.
 
 ## Setup
 
@@ -40,41 +32,34 @@ chmod +x setup_env.sh run_vlm_benchmark_sweeps.sh
 ./setup_env.sh vlm_sweep_20260617
 ```
 
-The setup script pins `antlr4-python3-runtime==4.9.3` after installing `lmms-eval` because its legacy and extended LaTeX parser dependencies publish conflicting runtime metadata. Both parser paths are smoke-tested during setup.
+The setup script also applies the local lmms-eval patch for reasoning capture, strict MCQ prompting, and Qwen/Gemma reasoning-output splitting.
 
 ## Configure
 
 Edit [config.sh](config.sh):
 - `MODEL_PATHS`, `MODEL_ALIASES`, and `ANSWER_MODEL_NAMES`
-- Sweep values: temperature, top-p, repetition penalty
-- Separate non-thinking and thinking baseline values: `NON_REASON_BASELINE_*` and `REASON_BASELINE_*`
-- Fixed `TOP_K_VALUE`
-- `EXPORT_CSV="0"` to discard temporary CSV files after each run
-- `GEMINI_API_KEY` from your shell environment for reasoning-mode answer extraction
+- `SELECTED_MODEL_ALIASES` if you want to run only a subset of the 11 configured models
 - GPU/server settings if needed
+- `LIMIT` for smoke tests
 
-Your current test models are already set to:
-- `/data/models/Qwen3.5-4B`
-- `/data/models/Qwen3.5-9B`
+No external judge API key is required.
 
 ## Run
 
-Set the Gemini key only in your shell, not in any tracked file:
-
 ```bash
-export GEMINI_API_KEY="your_key_here"
 cd /home/dameli/vlm_sweep/code
 ./run_vlm_benchmark_sweeps.sh ./config.sh
 ```
 
-Final artifacts are stored under:
+Final artifacts:
 - `/home/dameli/vlm_sweep/answers/<model_name>/*.jsonl`
 - `/home/dameli/vlm_sweep/results/all_results.jsonl`
 
-Answer JSONL files are updated after each completed model response. Non-thinking rows contain:
+Thinking-mode answer rows contain:
 - `true_answer`
+- `thinking_process`
 - `response`
 
-Thinking-mode rows contain the complete original generation in `thinking_process`. Gemini extracts the explicit final answer for MMMU Pro, MMStar, and AI2D into `response`; it is not given the ground-truth answer during extraction. A missing explicit final answer produces an empty `response`, which is excluded from accuracy.
+`response` is extracted locally as a single final option letter. If no clean final letter can be extracted, `response` is empty and the row is excluded from the accuracy denominator.
 
-The consolidated results JSONL stores one record per benchmark sweep run with the run parameters, fixed top-k value, and accuracy. Empty or invalid answers are excluded from the accuracy denominator. Temporary lmms-eval logs and raw outputs are written under `WORK_ROOT` from [config.sh](config.sh), currently `/tmp/vlm_sweep_work`.
+Each result row contains `accuracy`, `overall_questions`, and `answered_questions`.

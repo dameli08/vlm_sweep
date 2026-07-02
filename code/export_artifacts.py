@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 import argparse
+import ast
 import csv
 import json
 import re
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
-from gemini_answer_extractor import extract_final_answer
+from answer_extraction import extract_final_letter_strict, split_reasoning_response, strip_reasoning_blocks
 
 
 def parse_args():
@@ -25,8 +24,6 @@ def parse_args():
     parser.add_argument("--top-p", required=True)
     parser.add_argument("--top-k", required=True)
     parser.add_argument("--repetition-penalty", required=True)
-    parser.add_argument("--gemini-api-key", default="")
-    parser.add_argument("--gemini-model", default="gemini-3.1-flash-lite")
     return parser.parse_args()
 
 
@@ -38,31 +35,9 @@ def to_text(value):
     return json.dumps(value, ensure_ascii=False)
 
 
-def split_reasoning(text):
-    text = to_text(text)
-    paired = re.search(r"<think>(.*?)</think>(.*)$", text, flags=re.I | re.S)
-    if paired:
-        return paired.group(1).strip(), paired.group(2).strip()
-    closing = list(re.finditer(r"</think>", text, flags=re.I))
-    if closing:
-        marker = closing[-1]
-        thinking = re.sub(r"^\s*<think>", "", text[: marker.start()], flags=re.I).strip()
-        return thinking, text[marker.end() :].strip()
-    analysis = re.search(r"<analysis>(.*?)</analysis>(.*)$", text, flags=re.I | re.S)
-    if analysis:
-        return analysis.group(1).strip(), analysis.group(2).strip()
-    return "", text.strip()
-
-
-def strip_think_blocks(text):
-    return split_reasoning(text)[1]
-
-
 def normalize_text(text):
-    text = strip_think_blocks(text)
+    text = strip_reasoning_blocks(text)
     try:
-        import ast
-
         parsed = ast.literal_eval(text)
         if isinstance(parsed, list):
             text = " ".join(str(item) for item in parsed)
@@ -75,45 +50,13 @@ def normalize_text(text):
     return text.strip().lower()
 
 
-def extract_letter(text):
-    cleaned = strip_think_blocks(text).upper()
-    patterns = [
-        r"FINAL\s*ANSWER\s*(?:IS|:|=|-)?\s*\(?\s*([A-Z])\s*\)?",
-        r"ANSWER\s*(?:IS|:|=|-)?\s*\(?\s*([A-Z])\s*\)?",
-        r"OPTION\s*(?:IS|:|=|-)?\s*\(?\s*([A-Z])\s*\)?",
-        r"CHOICE\s*(?:IS|:|=|-)?\s*\(?\s*([A-Z])\s*\)?",
-    ]
-    for pattern in patterns:
-        hits = re.findall(pattern, cleaned)
-        if hits:
-            return hits[-1]
-    solo = re.fullmatch(r"\(?\s*([A-Z])\s*[\)\].,:;\-!?]*\s*", cleaned)
-    if solo:
-        return solo.group(1)
-    tail_tokens = re.findall(r"\b([A-Z])\b", cleaned[-80:])
-    return tail_tokens[-1] if tail_tokens else ""
-
-
 def benchmark_key(name):
-    lower = name.lower()
+    lower = (name or "").lower()
     if "mmmu" in lower:
         return "mmmu_pro"
     if "ai2d" in lower:
         return "ai2d"
-    if "ocrbench" in lower:
-        return "ocrbench"
-    if "mmstar" in lower:
-        return "mmstar"
     return re.sub(r"[^a-z0-9]+", "_", lower).strip("_")
-
-
-def benchmark_rule(name):
-    key = benchmark_key(name)
-    if key in {"mmmu_pro", "mmstar", "ai2d"}:
-        return "letter"
-    if key == "ocrbench":
-        return "gemini_judge"
-    return "letter"
 
 
 def pick_prediction(record):
@@ -145,6 +88,7 @@ def pick_doc_id(record):
                 return doc[key]
     return ""
 
+
 def pick_doc(record):
     doc = record.get("doc") if isinstance(record, dict) else None
     return doc if isinstance(doc, dict) else {}
@@ -158,6 +102,20 @@ def option_letter(index):
     if 0 <= index < 26:
         return chr(ord("A") + index)
     return ""
+
+
+def extract_true_letter(text):
+    text = to_text(text).strip()
+    digit = option_letter(text)
+    if digit:
+        return digit
+    labelled = re.match(r"^\s*([A-J])\s*[\.)\]:-]", text, flags=re.I)
+    if labelled:
+        return labelled.group(1).upper()
+    solo = re.fullmatch(r"\s*([A-J])\s*", text, flags=re.I)
+    if solo:
+        return solo.group(1).upper()
+    return extract_final_letter_strict(text)
 
 
 def canonical_true_answer(benchmark, target, record=None):
@@ -180,7 +138,7 @@ def canonical_true_answer(benchmark, target, record=None):
             try:
                 idx = int(target)
             except (TypeError, ValueError):
-                target_letter = extract_letter(target_text)
+                target_letter = extract_true_letter(target_text)
                 if target_letter:
                     idx = ord(target_letter) - ord("A")
         if idx is not None and 0 <= idx < len(options):
@@ -190,64 +148,6 @@ def canonical_true_answer(benchmark, target, record=None):
     if target_letter:
         return target_letter
     return target_text
-
-
-def ai2d_true_parts(true_answer):
-    text = to_text(true_answer).strip()
-    letter = ""
-    option_text = ""
-
-    digit_letter = option_letter(text)
-    if digit_letter:
-        letter = digit_letter
-
-    labelled = re.match(r"^\s*([A-Z])\s*[\.)\]:-]\s*(.+?)\s*$", text, flags=re.I | re.S)
-    if labelled:
-        letter = labelled.group(1).upper()
-        option_text = labelled.group(2).strip()
-    elif re.fullmatch(r"\s*[A-Z]\s*", text, flags=re.I):
-        letter = text.strip().upper()
-    elif text:
-        option_text = text
-
-    return letter, option_text
-
-
-def normalize_option_text(text):
-    norm = normalize_text(text)
-    norm = re.sub(r"^(final answer|answer|option|choice)\s*(is|:|=|-)?\s*", "", norm).strip()
-    norm = re.sub(r"^[a-z]\s*[\.)\]:-]\s*", "", norm).strip()
-    return norm
-
-def extract_mcq_letter_strict(text):
-    raw = strip_think_blocks(to_text(text)).strip()
-    patterns = [
-        r"^\s*\(?\s*([A-Z])\s*\)?\s*[\.)\]:,;!-]*\s*$",
-        r"^\s*([A-Z])\s*[\.)\]:-]\s+",
-        r"(?:final\s+answer|answer|option|choice)\s*(?:is|:|=|-)?\s*\(?\s*([A-Z])\s*\)?\s*(?:$|[\.)\],:;!])",
-        r"<answer>\s*\(?\s*([A-Z])\s*\)?\s*</answer>",
-    ]
-    for pattern in patterns:
-        hits = re.findall(pattern, raw, flags=re.I | re.S)
-        if hits:
-            return hits[-1].upper()
-    return ""
-
-
-
-def ai2d_match_status(true_answer, response):
-    true_letter, true_option = ai2d_true_parts(true_answer)
-    pred_letter = extract_mcq_letter_strict(response)
-    pred_norm = normalize_option_text(response)
-    true_option_norm = normalize_option_text(true_option)
-
-    if not pred_letter and not pred_norm:
-        return None
-    if true_letter and pred_letter:
-        return true_letter == pred_letter
-    if true_option_norm and pred_norm:
-        return true_option_norm == pred_norm or true_option_norm in pred_norm
-    return False
 
 
 def load_live_rows(out_dir, benchmark):
@@ -316,16 +216,13 @@ def collect_rows(out_dir, benchmark):
         raw_prediction = to_text(pick_prediction(record))
         live_raw = to_text(live.get("raw_response_full", ""))
         source_response = live_raw or raw_prediction
-        parsed_thinking, parsed_response = split_reasoning(source_response)
+        parsed_thinking, parsed_response = split_reasoning_response(source_response)
         visible = to_text(live.get("visible_response", "")) or parsed_response
-        if "</think>" in visible.lower() or "<think>" in visible.lower():
-            fallback_thinking, visible = split_reasoning(visible)
-            parsed_thinking = parsed_thinking or fallback_thinking
         rows.append(
             {
                 "doc_id": doc_id,
                 "true_answer": target,
-                "response": visible.strip(),
+                "response": extract_final_letter_strict(visible),
                 "thinking_process": to_text(live.get("thinking_trace", "")) or parsed_thinking,
             }
         )
@@ -333,16 +230,15 @@ def collect_rows(out_dir, benchmark):
     if not rows and live_rows:
         seen = set()
         for key, live in live_rows.items():
-            if isinstance(key, tuple):
-                continue
-            if key in seen:
+            if isinstance(key, tuple) or key in seen:
                 continue
             seen.add(key)
+            response = to_text(live.get("visible_response") or live.get("prediction_clean") or live.get("prediction_raw", ""))
             rows.append(
                 {
                     "doc_id": key,
                     "true_answer": canonical_true_answer(benchmark, live.get("true_answer_text", "")),
-                    "response": to_text(live.get("visible_response") or live.get("prediction_clean") or live.get("prediction_raw", "")),
+                    "response": extract_final_letter_strict(response),
                     "thinking_process": to_text(live.get("thinking_trace", "")),
                 }
             )
@@ -350,102 +246,30 @@ def collect_rows(out_dir, benchmark):
     return rows
 
 
-def gemini_judge(api_key, model, true_answer, response):
-    if not api_key:
-        true_norm = normalize_text(true_answer)
-        response_norm = normalize_text(response)
-        return bool(true_norm and response_norm and (true_norm == response_norm or true_norm in response_norm)), "heuristic_no_gemini_key"
-
-    prompt = (
-        "You are judging an OCR benchmark answer. Determine whether the model response "
-        "contains the same final answer as the ground truth. Ignore harmless wording, "
-        "quotes, currency/math symbols, punctuation, and phrases such as 'the answer is'. "
-        "Return only JSON with this schema: {\"correct\": true or false}.\n\n"
-        f"Ground truth: {true_answer}\n"
-        f"Model response: {response}\n"
-    )
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as result:
-            data = json.loads(result.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        true_norm = normalize_text(true_answer)
-        response_norm = normalize_text(response)
-        fallback = bool(true_norm and response_norm and (true_norm == response_norm or true_norm in response_norm))
-        return fallback, f"heuristic_after_gemini_error:{exc}"
-
-    text = ""
-    for candidate in data.get("candidates", []):
-        for part in candidate.get("content", {}).get("parts", []):
-            text += part.get("text", "")
-    match = re.search(r"\{.*\}", text, flags=re.S)
-    if match:
-        try:
-            judged = json.loads(match.group(0))
-            return bool(judged.get("correct")), "gemini"
-        except json.JSONDecodeError:
-            pass
-    return ("true" in text.lower() and "false" not in text.lower()), "gemini_text_fallback"
-
-
-def evaluate(rows, benchmark, gemini_api_key, gemini_model):
-    rule = benchmark_rule(benchmark)
+def evaluate(rows, benchmark):
     total = len(rows)
     valid = 0
     correct = 0
     invalid = 0
-    judge_notes = {}
 
     for row in rows:
-        true_answer = row["true_answer"]
-        response = row["response"]
-        if not normalize_text(true_answer) or not normalize_text(response):
+        true_answer = row.get("true_answer", "")
+        response = row.get("response", "")
+        true_letter = extract_true_letter(true_answer)
+        pred_letter = extract_final_letter_strict(response)
+        if not true_letter or not pred_letter:
             invalid += 1
             continue
-
-        if rule == "letter":
-            if benchmark_key(benchmark) == "ai2d":
-                match = ai2d_match_status(true_answer, response)
-                if match is None:
-                    invalid += 1
-                    continue
-                valid += 1
-                if match:
-                    correct += 1
-                continue
-
-            true_letter = extract_letter(true_answer)
-            pred_letter = extract_mcq_letter_strict(response)
-            if not true_letter or not pred_letter:
-                invalid += 1
-                continue
-            valid += 1
-            if true_letter == pred_letter:
-                correct += 1
-            continue
-
         valid += 1
-        is_correct, judge = gemini_judge(gemini_api_key, gemini_model, true_answer, response)
-        judge_notes[judge] = judge_notes.get(judge, 0) + 1
-        if is_correct:
+        if true_letter == pred_letter:
             correct += 1
 
-    accuracy = correct / valid if valid else None
     return {
-        "accuracy": accuracy,
+        "accuracy": correct / valid if valid else None,
         "correct": correct,
         "valid_count": valid,
         "invalid_count": invalid,
         "total_rows": total,
-        "rule": rule,
-        "judge_notes": judge_notes,
     }
 
 
@@ -479,44 +303,6 @@ def load_answer_file(path):
     return rows
 
 
-
-def complete_reason_generation(row):
-    thinking = to_text(row.get("thinking_process", "")).strip()
-    response = to_text(row.get("response", "")).strip()
-    if not response or response in thinking[-max(2000, len(response) + 100):]:
-        return thinking or response
-    return f"{thinking}\n{response}".strip()
-
-
-def normalize_reason_rows_with_gemini(rows, args, only_empty=False):
-    if not args.gemini_api_key:
-        raise SystemExit("GEMINI_API_KEY is required to normalize reason-mode answers")
-    normalized = []
-    attempted = 0
-    for row in rows:
-        generation = complete_reason_generation(row)
-        current_response = to_text(row.get("response", "")).strip()
-        if only_empty and current_response:
-            final_answer = current_response
-        else:
-            final_answer = extract_final_answer(
-                args.gemini_api_key,
-                args.gemini_model,
-                args.benchmark,
-                generation,
-            )
-            attempted += 1
-            if attempted % 50 == 0:
-                print(f"[INFO] Gemini-normalized {attempted} reason answers")
-        normalized.append(
-            {
-                "true_answer": row.get("true_answer", ""),
-                "thinking_process": generation,
-                "response": final_answer,
-            }
-        )
-    return normalized
-
 def write_answer_file(rows, answers_root, model_name, benchmark, mode, sweep_param, sweep_value):
     path = answer_file_path(answers_root, model_name, benchmark, mode, sweep_param, sweep_value)
     with path.open("w", encoding="utf-8") as handle:
@@ -549,6 +335,8 @@ def append_result(args, metric):
         },
         "benchmark": key,
         "accuracy": metric["accuracy"],
+        "overall_questions": metric["total_rows"],
+        "answered_questions": metric["valid_count"],
     }
     with results_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -570,31 +358,17 @@ def main():
         rows = load_answer_file(answer_path)
         if not rows:
             raise SystemExit(f"Reason-mode live answer file is empty or missing: {answer_path}")
-        ready_path = out_dir / ".gemini_answers_ready"
+        ready_path = out_dir / ".answers_ready"
         deadline = time.time() + 7200
         while not ready_path.exists() and (out_dir / ".live_writer_stop").exists():
             if time.time() > deadline:
-                raise SystemExit(f"Timed out waiting for Gemini answer extraction: {answer_path}")
+                raise SystemExit(f"Timed out waiting for answer extraction: {answer_path}")
             time.sleep(1)
         rows = load_answer_file(answer_path)
-        if not ready_path.exists():
-            # Compatibility fallback for an older writer that did not perform
-            # Gemini extraction. Current writers leave failed responses empty.
-            rows = normalize_reason_rows_with_gemini(rows, args)
-            answer_path = write_answer_file(
-                rows,
-                answers_root,
-                args.model_name,
-                args.benchmark,
-                args.mode,
-                args.sweep_param,
-                args.sweep_value,
-            )
-            ready_path.touch()
     else:
         rows = collect_rows(out_dir, args.benchmark)
         answer_path = write_answer_file(rows, answers_root, args.model_name, args.benchmark, args.mode, args.sweep_param, args.sweep_value)
-    metric = evaluate(rows, args.benchmark, args.gemini_api_key, args.gemini_model)
+    metric = evaluate(rows, args.benchmark)
     append_result(args, metric)
     print(f"[INFO] wrote answers={answer_path} accuracy={metric['accuracy']} valid={metric['valid_count']} invalid={metric['invalid_count']}")
 

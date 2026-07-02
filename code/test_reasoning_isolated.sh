@@ -15,7 +15,6 @@ BASE_URL="http://127.0.0.1:23333/v1"
 OUT_DIR="/home/dameli/vlm_sweep/reason_isolated_$(date +%Y%m%d_%H%M%S)"
 TASK_CANDIDATES=(
   "mmmu_pro_vision_cot_reasoning"
-  "mmstar_reasoning"
   "ai2d_reasoning"
 )
 

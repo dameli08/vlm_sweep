@@ -36,11 +36,10 @@ BATCH_SIZE="1"
 LIMIT=""  # keep empty for full benchmark; set e.g. 10 for smoke tests
 LOG_SAMPLES="1"
 EXPORT_CSV="0"
-RUN_NON_REASON="1"
+RUN_NON_REASON="0"
 RUN_REASON="1"
 
 # Optional mode-specific extra model args.
-# For Qwen3.5 thinking mode, these are commonly used with vLLM OpenAI endpoint.
 NON_REASON_EXTRA_MODEL_ARGS='enable_thinking=false,force_letter_output=true'
 REASON_EXTRA_MODEL_ARGS='enable_thinking=true,force_letter_output=true'
 
@@ -51,58 +50,108 @@ REASON_EXTRA_GEN_KWARGS=""
 # =========================
 # Benchmarks
 # =========================
-# Non-reason run uses these IDs.
 NON_REASON_BENCHMARKS=(
   "mmmu_pro_vision"
   "ai2d"
-  "mmstar"
 )
 
-# Reason run uses reasoning IDs.
 REASON_BENCHMARKS=(
   "mmmu_pro_vision_cot_reasoning"
   "ai2d_reasoning"
-  "mmstar_reasoning"
 )
 
 # =========================
-# Models (test setup requested)
+# Models
 # =========================
-# Keep these arrays same length and order.
+# Keep these arrays same length and order. Edit paths to match local storage.
 MODEL_PATHS=(
   "/data/models/Qwen3.5-4B"
   "/data/models/Qwen3.5-9B"
+  "/data/models/Qwen3.5-27B"
+  "/data/models/Qwen3.6-27B"
+  "/data/models/Qwen3.6-35B"
+  "/data/models/gemma-4-E2B-it"
+  "/data/models/gemma-4-4b-it"
+  "/data/models/gemma-4-12B-it"
+  "/data/models/Gemma4-26B"
+  "/data/models/Gemma4-32B"
+  "Qwen/Qwen3-Omni-30B-A3B-Thinking"
 )
 
 MODEL_ALIASES=(
   "qwen3.5-4b"
   "qwen3.5-9b"
+  "qwen3.5-27b"
+  "qwen3.6-27b"
+  "qwen3.6-35b"
+  "gemma4-2b"
+  "gemma4-4b"
+  "gemma4-12b"
+  "gemma4-26b"
+  "gemma4-32b"
+  "qwen3-omni-30b-a3b-thinking"
 )
 
-# Names used for output folders under answers/.
 ANSWER_MODEL_NAMES=(
-  "qwen_4b"
-  "qwen_9b"
+  "qwen3.5_4b"
+  "qwen3.5_9b"
+  "qwen3.5_27b"
+  "qwen3.6_27b"
+  "qwen3.6_35b"
+  "gemma4_2b"
+  "gemma4_4b"
+  "gemma4_12b"
+  "gemma4_26b"
+  "gemma4_32b"
+  "qwen3_omni_30b_a3b_thinking"
 )
+
+# Leave empty to run every model above. To run a subset, list aliases here, e.g.:
+# SELECTED_MODEL_ALIASES=("qwen3.5-4b" "gemma4-2b")
+SELECTED_MODEL_ALIASES=("qwen3.5-4b" "qwen3.5-9b" "gemma4-2b" "gemma4-4b" "gemma4-12b")
 
 # =========================
 # Sweep values (NO combinations)
 # =========================
-TEMPERATURE_VALUES=(0.2 0.4)
-TOP_P_VALUES=(0.95 1.0)
-REPETITION_PENALTY_VALUES=(1.10 1.30)
+TEMPERATURE_VALUES=(0.8 0.9 1.0)
+TOP_P_VALUES=(0.85 0.90 0.95)
+REPETITION_PENALTY_VALUES=(1.0 1.1 1.2)
 
-# Fixed architecture/generation value included in every run record.
 TOP_K_VALUE="20"
 
-# Mode-specific baselines used while sweeping one parameter at a time.
-NON_REASON_BASELINE_TEMPERATURE="0.7"
-NON_REASON_BASELINE_TOP_P="0.8"
-NON_REASON_BASELINE_REPETITION_PENALTY="1.0"
+#NON_REASON_BASELINE_TEMPERATURE="0.8"
+#NON_REASON_BASELINE_TOP_P="0.90"
+#NON_REASON_BASELINE_REPETITION_PENALTY="1.0"
 
 REASON_BASELINE_TEMPERATURE="1.0"
 REASON_BASELINE_TOP_P="0.95"
 REASON_BASELINE_REPETITION_PENALTY="1.0"
+
+# Optional per-model reasoning baselines. Keys must match MODEL_ALIASES.
+# If a model alias is not listed, the global REASON_BASELINE_* values above are used.
+declare -A REASON_BASELINE_TEMPERATURE_BY_MODEL=(
+  ["qwen3.5-4b"]="1.0"
+  ["qwen3.5-9b"]="1.0"
+  ["gemma4-2b"]="1.0"
+  ["gemma4-4b"]="1.0"
+  ["gemma4-12b"]="1.0"
+)
+
+declare -A REASON_BASELINE_TOP_P_BY_MODEL=(
+  ["qwen3.5-4b"]="0.95"
+  ["qwen3.5-9b"]="0.95"
+  ["gemma4-2b"]="0.95"
+  ["gemma4-4b"]="0.95"
+  ["gemma4-12b"]="0.95"
+)
+
+declare -A REASON_BASELINE_REPETITION_PENALTY_BY_MODEL=(
+  ["qwen3.5-4b"]="1.0"
+  ["qwen3.5-9b"]="1.0"
+  ["gemma4-2b"]="1.0"
+  ["gemma4-4b"]="1.0"
+  ["gemma4-12b"]="1.0"
+)
 
 # =========================
 # Output
@@ -115,11 +164,5 @@ RESULTS_JSONL="${RESULTS_ROOT}/all_results.jsonl"
 WORK_ROOT="/tmp/vlm_sweep_work"
 RUN_TAG="$(date +%Y%m%d_%H%M%S)"
 
-# Reason-mode answer extraction.
-# Set GEMINI_API_KEY in your shell before running; do not store it in this repo.
-GEMINI_API_KEY="${GEMINI_API_KEY:-}"
-GEMINI_MODEL="gemini-3.1-flash-lite"
 EXPORT_ARTIFACTS="1"
-
-# Continue/stop all runs even if one experiment fails.
 CONTINUE_ON_ERROR="0"
