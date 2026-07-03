@@ -10,7 +10,7 @@
 
 
 # Generated answer files
-answers/
+
 
 __pycache__/
 *.pyc
