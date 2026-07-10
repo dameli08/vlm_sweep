@@ -31,9 +31,9 @@ API_MAX_RETRIES="3"
 EVAL_MODEL_BACKEND="openai_compatible_chat"
 MAX_NEW_TOKENS="1024"
 NON_REASON_MAX_NEW_TOKENS="1024"
-REASON_MAX_NEW_TOKENS="12000"
+REASON_MAX_NEW_TOKENS="32768"
 BATCH_SIZE="1"
-LIMIT=""  # keep empty for full benchmark; set e.g. 10 for smoke tests
+LIMIT=""  # optional emergency/debug limit; fixed benchmark subsamples are configured below
 LOG_SAMPLES="1"
 EXPORT_CSV="0"
 RUN_NON_REASON="0"
@@ -53,11 +53,13 @@ REASON_EXTRA_GEN_KWARGS=""
 NON_REASON_BENCHMARKS=(
   "mmmu_pro_vision"
   "ai2d"
+  "mathvision_reason_testmini"
 )
 
 REASON_BENCHMARKS=(
   "mmmu_pro_vision_cot_reasoning"
   "ai2d_reasoning"
+  "mathvision_reason_testmini_reasoning"
 )
 
 # =========================
@@ -113,19 +115,26 @@ SELECTED_MODEL_ALIASES=("qwen3.5-4b" "qwen3.5-9b" "gemma4-2b" "gemma4-4b" "gemma
 # =========================
 # Sweep values (NO combinations)
 # =========================
-TEMPERATURE_VALUES=(0.8 0.9 1.0)
-TOP_P_VALUES=(0.85 0.90 0.95)
-REPETITION_PENALTY_VALUES=(1.0 1.1 1.2)
+REPETITION_PENALTY_VALUES=(1.0 1.05 1.1 1.15 1.2)
+PRESENCE_PENALTY_VALUES=(0 0.5 1.0 1.5 2.0)
+SAMPLE_SEEDS=(0 1 2 3 4)
+
+SUBSAMPLE_SEED="20260710"
+SUBSAMPLE_SIZE_MMMU_PRO="250"
+SUBSAMPLE_SIZE_AI2D="250"
+SUBSAMPLE_SIZE_MATHVISION=""  # empty means all 304 testmini rows
 
 TOP_K_VALUE="20"
 
 #NON_REASON_BASELINE_TEMPERATURE="0.8"
 #NON_REASON_BASELINE_TOP_P="0.90"
 #NON_REASON_BASELINE_REPETITION_PENALTY="1.0"
+#NON_REASON_BASELINE_PRESENCE_PENALTY="0"
 
 REASON_BASELINE_TEMPERATURE="1.0"
 REASON_BASELINE_TOP_P="0.95"
 REASON_BASELINE_REPETITION_PENALTY="1.0"
+REASON_BASELINE_PRESENCE_PENALTY="0"
 
 # Optional per-model reasoning baselines. Keys must match MODEL_ALIASES.
 # If a model alias is not listed, the global REASON_BASELINE_* values above are used.
@@ -153,6 +162,14 @@ declare -A REASON_BASELINE_REPETITION_PENALTY_BY_MODEL=(
   ["gemma4-12b"]="1.0"
 )
 
+declare -A REASON_BASELINE_PRESENCE_PENALTY_BY_MODEL=(
+  ["qwen3.5-4b"]="0"
+  ["qwen3.5-9b"]="0"
+  ["gemma4-2b"]="0"
+  ["gemma4-4b"]="0"
+  ["gemma4-12b"]="0"
+)
+
 # =========================
 # Output
 # =========================
@@ -161,6 +178,7 @@ PROJECT_ROOT="$(cd "${CODE_DIR}/.." && pwd)"
 ANSWERS_ROOT="${PROJECT_ROOT}/answers"
 RESULTS_ROOT="${PROJECT_ROOT}/results"
 RESULTS_JSONL="${RESULTS_ROOT}/all_results.jsonl"
+SUBSAMPLE_ROOT="${PROJECT_ROOT}/code/subsamples"
 WORK_ROOT="/tmp/vlm_sweep_work"
 RUN_TAG="$(date +%Y%m%d_%H%M%S)"
 

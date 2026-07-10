@@ -81,3 +81,60 @@ def extract_reasoning_answer(text):
     if not answer:
         answer = extract_final_letter_strict(text)
     return thinking, answer
+
+
+
+def extract_boxed_answer(text):
+    raw = strip_reasoning_blocks(to_text(text)).strip()
+    matches = re.findall(r"\\boxed\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}", raw, flags=re.S)
+    if matches:
+        return matches[-1].strip()
+    return ""
+
+
+def clean_final_answer_text(text):
+    raw = strip_reasoning_blocks(to_text(text)).strip()
+    raw = re.sub(r"</?(think|analysis|answer)>", " ", raw, flags=re.I)
+    raw = _strip_channel_tags(raw).strip()
+    boxed = extract_boxed_answer(raw)
+    if boxed:
+        return boxed
+    patterns = [
+        r"(?:final\s+answer|answer|therefore|so)\s*(?:is|:|=|-)?\s*(.+)$",
+        r"^\s*\\\[(.+?)\\\]\s*$",
+        r"^\s*\\\((.+?)\\\)\s*$",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, raw, flags=re.I | re.S)
+        if m:
+            raw = m.group(1).strip()
+            break
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if lines:
+        raw = lines[-1]
+    raw = raw.strip().strip("` ")
+    raw = re.sub(r"^[=:;,.\s]+", "", raw)
+    raw = re.sub(r"[.;,\s]+$", "", raw)
+    return raw.strip()
+
+
+def extract_benchmark_answer(text, benchmark="", true_answer=""):
+    key = (benchmark or "").lower()
+    true_text = to_text(true_answer).strip()
+    if "mathvision" not in key:
+        return extract_final_letter_strict(text)
+    if re.match(r"^\s*[A-J]\s*[\.)\]:-]", true_text, flags=re.I) or re.fullmatch(r"\s*[A-J]\s*", true_text, flags=re.I):
+        return extract_final_letter_strict(text)
+    letter = extract_final_letter_strict(text)
+    final = clean_final_answer_text(text)
+    if letter and re.fullmatch(r"[A-J]", final, flags=re.I):
+        return letter
+    return final
+
+
+def extract_reasoning_benchmark_answer(text, benchmark="", true_answer=""):
+    thinking, final = split_reasoning_response(text)
+    answer = extract_benchmark_answer(final, benchmark, true_answer)
+    if not answer:
+        answer = extract_benchmark_answer(text, benchmark, true_answer)
+    return thinking, answer

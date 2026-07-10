@@ -4,7 +4,6 @@ import importlib.util
 import re
 
 
-
 def re_replace_method(text, method_name, replacement):
     pattern = rf"    def {re.escape(method_name)}\(.*?\n(?=    def |class |\Z)"
     updated, count = re.subn(pattern, lambda _m: replacement, text, count=1, flags=re.S)
@@ -12,15 +11,23 @@ def re_replace_method(text, method_name, replacement):
         raise SystemExit(f"Could not replace method {method_name}")
     return updated
 
-STRICT_REASONING_PROMPT = (
+STRICT_MCQ_REASONING_PROMPT = (
     "You are a multiple-choice visual reasoning assistant. Think internally if needed. "
     "When your reasoning is complete, output exactly one uppercase option letter from A to J and nothing else. "
     "Do not output words, punctuation, markdown, JSON, or <answer> tags after the reasoning. "
     "The final visible answer must be exactly one letter, for example: B"
 )
 
+STRICT_MATHVISION_REASONING_PROMPT = (
+    "You are a visual math reasoning assistant. Think internally if needed. "
+    "When reasoning is complete, output only the final answer and nothing else. "
+    "If the problem has choices, output exactly one uppercase option letter from A to J. "
+    "If the problem is open-ended, output exactly one concise mathematical value or expression, preferably inside one \\boxed{} expression. "
+    "Do not output explanatory words, markdown, JSON, or <answer> tags after reasoning."
+)
 
-def patch_task_prompt(module_name):
+
+def patch_task_prompt(module_name, prompt):
     spec = importlib.util.find_spec(module_name)
     if spec is None or spec.origin is None:
         return
@@ -41,9 +48,8 @@ def patch_task_prompt(module_name):
                 cursor += 1
                 break
         cursor += 1
-    replacement = f'SYSTEM_PROMPT = {STRICT_REASONING_PROMPT!r}\n'
+    replacement = f'SYSTEM_PROMPT = {prompt!r}\n'
     text = text[:start] + replacement + text[cursor:]
-
     path.write_text(text, encoding="utf-8")
     print(f"[INFO] Patched strict reasoning prompt: {path}")
 
@@ -52,7 +58,41 @@ for module in (
     "lmms_eval.tasks.ai2d.reasoning.utils",
     "lmms_eval.tasks.mmmu_pro.reasoning.utils",
 ):
-    patch_task_prompt(module)
+    patch_task_prompt(module, STRICT_MCQ_REASONING_PROMPT)
+patch_task_prompt("lmms_eval.tasks.mathvision.reasoning.utils", STRICT_MATHVISION_REASONING_PROMPT)
+
+# Tighten MathVision prompts without changing the underlying dataset/task.
+def patch_mathvision_doc_prompt(module_name):
+    spec = importlib.util.find_spec(module_name)
+    if spec is None or spec.origin is None:
+        return
+    path = Path(spec.origin)
+    text = path.read_text(encoding="utf-8")
+    replacement = r'''def mathvision_doc_to_text(doc, lmms_eval_specific_kwargs=None):
+    question, choices = doc["question"], doc["options"]
+    options = [chr(ord("A") + i) for i in range(len(choices))]
+    choices_str = "\n".join([f"{option}. {choice}" for option, choice in zip(options, choices)])
+
+    if choices_str:
+        return (
+            f"{question}\nChoices:\n{choices_str}\n"
+            "Think carefully. After your reasoning, output exactly one uppercase option letter from A to J and nothing else."
+        )
+    return (
+        f"{question}\n"
+        "Think carefully. After your reasoning, output only the final mathematical answer. "
+        "Use one \\boxed{} expression if possible, and do not add explanatory words after it."
+    )
+
+'''
+    text, count = re.subn(r"def mathvision_doc_to_text\(doc, lmms_eval_specific_kwargs=None\):\n.*?\n\n(?=def mathvision_|mathvision_doc_to_messages)", lambda _m: replacement, text, count=1, flags=re.S)
+    if count:
+        path.write_text(text, encoding="utf-8")
+        print(f"[INFO] Patched MathVision doc prompt: {path}")
+
+
+patch_mathvision_doc_prompt("lmms_eval.tasks.mathvision.utils")
+patch_mathvision_doc_prompt("lmms_eval.tasks.mathvision.reasoning.utils")
 
 spec = importlib.util.find_spec("lmms_eval.models.chat.openai")
 if spec is None or spec.origin is None:
@@ -126,7 +166,7 @@ split_helper = r'''    def _split_reasoning_response(self, text: str, explicit_r
 
 target_helper = r'''    def _canonical_live_target_text(self, task: str, split: str, doc_id, target_text: str) -> str:
         task_name = (task or "").lower()
-        if "ai2d" not in task_name:
+        if "ai2d" not in task_name and "mathvision" not in task_name:
             return target_text
         try:
             doc = self.task_dict[task][split][doc_id]
@@ -179,19 +219,19 @@ text = text.replace(
 )
 text = text.replace(
     'if "mmmu" in task_name or "ai2d" in task_name:\n                        true_letter = self._extract_final_letter(target_text)\n                        pred_letter = self._extract_final_letter(response_text)',
-    'if "mmmu" in task_name or "ai2d" in task_name:\n                        true_letter = self._extract_final_letter(target_text)\n                        pred_letter = self._extract_final_letter(response_text)',
+    'if "mmmu" in task_name or "ai2d" in task_name or ("mathvision" in task_name and self._extract_final_letter(target_text)):\n                        true_letter = self._extract_final_letter(target_text)\n                        pred_letter = self._extract_final_letter(response_text)',
 )
 text = text.replace(
     'if "mmmu" in task_name or "ai2d" in task_name:\n                        match_rule = "letter"',
-    'if "mmmu" in task_name or "ai2d" in task_name:\n                        match_rule = "letter"',
+    'if "mmmu" in task_name or "ai2d" in task_name or ("mathvision" in task_name and self._extract_final_letter(target_text)):\n                        match_rule = "letter"',
 )
 text = text.replace(
     'if "mmmu" in task_name:\n                        true_letter = self._extract_final_letter(target_text)\n                        pred_letter = self._extract_final_letter(response_text)',
-    'if "mmmu" in task_name or "ai2d" in task_name:\n                        true_letter = self._extract_final_letter(target_text)\n                        pred_letter = self._extract_final_letter(response_text)',
+    'if "mmmu" in task_name or "ai2d" in task_name or ("mathvision" in task_name and self._extract_final_letter(target_text)):\n                        true_letter = self._extract_final_letter(target_text)\n                        pred_letter = self._extract_final_letter(response_text)',
 )
 text = text.replace(
     'if "mmmu" in task_name:\n                        match_rule = "letter"',
-    'if "mmmu" in task_name or "ai2d" in task_name:\n                        match_rule = "letter"',
+    'if "mmmu" in task_name or "ai2d" in task_name or ("mathvision" in task_name and self._extract_final_letter(target_text)):\n                        match_rule = "letter"',
 )
 
 if new_response_block in text:
@@ -210,9 +250,140 @@ text = text.replace(
     'eb["chat_template_kwargs"] = ctk\n                if bool(self.enable_thinking):\n                    eb["skip_special_tokens"] = False\n                    eb["spaces_between_special_tokens"] = False\n                payload["extra_body"] = eb',
 )
 
+if 'if "presence_penalty" in request_gen_kwargs:' not in text:
+    text = text.replace(
+        'if "repetition_penalty" in request_gen_kwargs:\n                eb = payload.get("extra_body", {})\n                if not isinstance(eb, dict):\n                    eb = {}\n                eb["repetition_penalty"] = request_gen_kwargs.get("repetition_penalty")\n                payload["extra_body"] = eb\n\n',
+        'if "repetition_penalty" in request_gen_kwargs:\n                eb = payload.get("extra_body", {})\n                if not isinstance(eb, dict):\n                    eb = {}\n                eb["repetition_penalty"] = request_gen_kwargs.get("repetition_penalty")\n                payload["extra_body"] = eb\n\n            if "presence_penalty" in request_gen_kwargs:\n                payload["presence_penalty"] = request_gen_kwargs.get("presence_penalty")\n\n            if "seed" in request_gen_kwargs:\n                payload["seed"] = int(request_gen_kwargs.get("seed"))\n\n',
+    )
+
+
+# Add per-generation metadata to live-answer capture.
+text = text.replace(
+    'if payload is None:\n                return "", local_index, False, False, 0.0, 0, 0, 0',
+    'if payload is None:\n                return "", "", local_index, False, False, 0.0, 0, 0, 0, "", 0, 0',
+)
+text = text.replace(
+    'finish_reason = getattr(response.choices[0], "finish_reason", "") or ""\n                    response_message = response.choices[0].message',
+    'response_message = response.choices[0].message',
+)
+text = text.replace(
+    'response_message = response.choices[0].message\n                    answer_content = response_message.content or ""',
+    'finish_reason = getattr(response.choices[0], "finish_reason", "") or ""\n                    response_message = response.choices[0].message\n                    answer_content = response_message.content or ""',
+    1,
+)
+text = text.replace(
+    """                        reasoning_tokens,\n                    )""",
+    """                        reasoning_tokens,\n                        finish_reason,\n                        output_tokens,\n                        input_tokens,\n                    )""",
+    1,
+)
+text = text.replace(
+    'return failure_content, failure_content, local_index, False, rate_limited, elapsed, 0, 0, 0',
+    'return failure_content, failure_content, local_index, False, rate_limited, elapsed, 0, 0, 0, "error", 0, 0',
+)
+text = text.replace(
+    """                        reasoning_tokens,\n                    ) = future.result()""",
+    """                        reasoning_tokens,\n                        finish_reason,\n                        output_tokens,\n                        input_tokens,\n                    ) = future.result()""",
+    1,
+)
+text = text.replace(
+    '"resolved_match",\n        ]',
+    '"resolved_match",\n            "finish_reason",\n            "request_success",\n            "input_tokens",\n            "output_tokens",\n            "reasoning_tokens",\n        ]',
+)
+text = text.replace(
+    """                            "resolved_match": resolved_match,\n                        }""",
+    """                            "resolved_match": resolved_match,\n                            "finish_reason": finish_reason,\n                            "request_success": "1" if success else "0",\n                            "input_tokens": input_tokens,\n                            "output_tokens": output_tokens,\n                            "reasoning_tokens": reasoning_tokens,\n                        }""",
+    1,
+)
+
 path.write_text(text, encoding="utf-8")
 updated = path.read_text(encoding="utf-8")
 if "def _append_live_answer_row" not in updated or "thinking_trace" not in updated:
     raise SystemExit("Installed lmms-eval lacks the required live-answer capture hook")
 
-# Runtime payload patch marker is applied by direct text replacement in installed lmms-eval.
+# Patch fixed-subset filtering into Task.build_all_requests.
+task_spec = importlib.util.find_spec("lmms_eval.api.task")
+if task_spec is None or task_spec.origin is None:
+    raise SystemExit("lmms_eval.api.task is not importable")
+task_path = Path(task_spec.origin)
+task_text = task_path.read_text(encoding="utf-8")
+old_subset_block = '''        doc_id_docs = utils.create_iterator(
+            enumerate(self.eval_docs_no_media),
+            rank=rank,
+            limit=int(limit) if limit else None,
+            world_size=world_size,
+            offset=offset,
+        )
+        doc_iterator_for_counting = (
+            utils.create_iterator(
+                range(len(self.test_docs())),
+                rank=rank,
+                limit=limit,
+                world_size=world_size,
+                offset=offset,
+            )
+            if self.has_test_docs()
+            else utils.create_iterator(
+                range(len(self.validation_docs())),
+                rank=rank,
+                limit=limit,
+                world_size=world_size,
+                offset=offset,
+            )
+        )
+
+        num_docs = sum(1 for _ in doc_iterator_for_counting)
+'''
+new_subset_block = '''        fixed_subset_path = os.getenv("LMMS_FIXED_SUBSET_PATH", "").strip()
+        fixed_indices = None
+        if fixed_subset_path:
+            try:
+                with open(fixed_subset_path, "r", encoding="utf-8") as subset_f:
+                    subset_payload = json.load(subset_f)
+                fixed_indices = subset_payload.get("task_indices", {}).get(self.config.task)
+            except Exception as exc:
+                eval_logger.warning(f"Could not load fixed subset {fixed_subset_path}: {exc}")
+                fixed_indices = None
+
+        if fixed_indices is not None:
+            selected_indices = [int(i) for i in fixed_indices if int(i) >= offset]
+            selected_indices = selected_indices[rank::world_size]
+            if limit:
+                selected_indices = selected_indices[: int(limit)]
+            doc_id_docs = [(idx, self.eval_docs_no_media[idx]) for idx in selected_indices if idx < len(self.eval_docs_no_media)]
+            num_docs = len(doc_id_docs)
+        else:
+            doc_id_docs = utils.create_iterator(
+                enumerate(self.eval_docs_no_media),
+                rank=rank,
+                limit=int(limit) if limit else None,
+                world_size=world_size,
+                offset=offset,
+            )
+            doc_iterator_for_counting = (
+                utils.create_iterator(
+                    range(len(self.test_docs())),
+                    rank=rank,
+                    limit=limit,
+                    world_size=world_size,
+                    offset=offset,
+                )
+                if self.has_test_docs()
+                else utils.create_iterator(
+                    range(len(self.validation_docs())),
+                    rank=rank,
+                    limit=limit,
+                    world_size=world_size,
+                    offset=offset,
+                )
+            )
+
+            num_docs = sum(1 for _ in doc_iterator_for_counting)
+'''
+if "LMMS_FIXED_SUBSET_PATH" not in task_text:
+    if old_subset_block not in task_text:
+        raise SystemExit(f"Could not find subset insertion block in {task_path}")
+    task_text = task_text.replace(old_subset_block, new_subset_block, 1)
+    task_path.write_text(task_text, encoding="utf-8")
+    print(f"[INFO] Patched fixed subset support: {task_path}")
+else:
+    print(f"[INFO] Fixed subset support already patched: {task_path}")
