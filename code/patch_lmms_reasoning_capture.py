@@ -69,7 +69,10 @@ def patch_mathvision_doc_prompt(module_name):
     path = Path(spec.origin)
     text = path.read_text(encoding="utf-8")
     replacement = r'''def mathvision_doc_to_text(doc, lmms_eval_specific_kwargs=None):
-    question, choices = doc["question"], doc["options"]
+    question = doc.get("question", "")
+    choices = doc.get("options") or []
+    if not isinstance(choices, (list, tuple)):
+        choices = []
     options = [chr(ord("A") + i) for i in range(len(choices))]
     choices_str = "\n".join([f"{option}. {choice}" for option, choice in zip(options, choices)])
 
@@ -93,6 +96,21 @@ def patch_mathvision_doc_prompt(module_name):
 
 patch_mathvision_doc_prompt("lmms_eval.tasks.mathvision.utils")
 patch_mathvision_doc_prompt("lmms_eval.tasks.mathvision.reasoning.utils")
+
+
+def patch_mathvision_reasoning_template():
+    spec = importlib.util.find_spec("lmms_eval.tasks.mathvision.reasoning.utils")
+    if spec is None or spec.origin is None:
+        return
+    task_dir = Path(spec.origin).parent
+    template_path = task_dir / "_default_template_yaml"
+    template = 'output_type: generate_until\ndoc_to_visual: !function utils.mathvision_doc_to_visual\ndoc_to_text: !function utils.mathvision_doc_to_text\ndoc_to_messages: !function utils.mathvision_doc_to_messages\ndoc_to_target: "answer"\nprocess_results: !function utils.mathvision_process_results\nmetric_list:\n  - metric: acc_score\n    aggregation: mean\n    higher_is_better: true\n  - metric: format_score\n    aggregation: mean\n    higher_is_better: true\ngeneration_kwargs:\n  max_new_tokens: 32768\nmetadata:\n  version: 0.0\n'
+    if not template_path.exists() or template_path.read_text(encoding="utf-8") != template:
+        template_path.write_text(template, encoding="utf-8")
+        print(f"[INFO] Patched MathVision reasoning template: {template_path}")
+
+
+patch_mathvision_reasoning_template()
 
 spec = importlib.util.find_spec("lmms_eval.models.chat.openai")
 if spec is None or spec.origin is None:
@@ -293,6 +311,10 @@ text = text.replace(
     """                            "resolved_match": resolved_match,\n                        }""",
     """                            "resolved_match": resolved_match,\n                            "finish_reason": finish_reason,\n                            "request_success": "1" if success else "0",\n                            "input_tokens": input_tokens,\n                            "output_tokens": output_tokens,\n                            "reasoning_tokens": reasoning_tokens,\n                        }""",
     1,
+)
+text = text.replace(
+    'writer = csv.DictWriter(f, fieldnames=fieldnames)',
+    'writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL, escapechar="\\\\")',
 )
 
 path.write_text(text, encoding="utf-8")

@@ -51,15 +51,16 @@ REASON_EXTRA_GEN_KWARGS=""
 # Benchmarks
 # =========================
 NON_REASON_BENCHMARKS=(
-  "mmmu_pro_vision"
-  "ai2d"
+  #"mmmu_pro_vision"
+  #"ai2d"
   "mathvision_reason_testmini"
 )
 
 REASON_BENCHMARKS=(
+  "mathvision_reason_testmini_reasoning"
   "mmmu_pro_vision_cot_reasoning"
   "ai2d_reasoning"
-  "mathvision_reason_testmini_reasoning"
+  
 )
 
 # =========================
@@ -117,7 +118,7 @@ SELECTED_MODEL_ALIASES=("qwen3.5-4b" "qwen3.5-9b" "gemma4-2b" "gemma4-4b" "gemma
 # =========================
 REPETITION_PENALTY_VALUES=(1.0 1.05 1.1 1.15 1.2)
 PRESENCE_PENALTY_VALUES=(0 0.5 1.0 1.5 2.0)
-SAMPLE_SEEDS=(0 1 2 3 4)
+SAMPLE_SEEDS=(0 1 2)
 
 SUBSAMPLE_SEED="20260710"
 SUBSAMPLE_SIZE_MMMU_PRO="250"
@@ -180,7 +181,7 @@ RESULTS_ROOT="${PROJECT_ROOT}/results"
 RESULTS_JSONL="${RESULTS_ROOT}/all_results.jsonl"
 SUBSAMPLE_ROOT="${PROJECT_ROOT}/code/subsamples"
 WORK_ROOT="/tmp/vlm_sweep_work"
-RUN_TAG="$(date +%Y%m%d_%H%M%S)"
+RUN_TAG="${RUN_TAG:-$(date +%Y%m%d_%H%M%S)}"
 
-EXPORT_ARTIFACTS="1"
-CONTINUE_ON_ERROR="0"
+EXPORT_ARTIFACTS="${EXPORT_ARTIFACTS:-1}"
+CONTINUE_ON_ERROR="${CONTINUE_ON_ERROR:-1}"

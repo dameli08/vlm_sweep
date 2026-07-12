@@ -436,14 +436,19 @@ def load_answer_file(path):
         except json.JSONDecodeError:
             continue
         if isinstance(record, dict):
+            true_answer = to_text(record.get("true_answer", ""))
+            response = to_text(record.get("response", ""))
+            raw_output = to_text(record.get("raw_output", ""))
+            if not response and raw_output:
+                response = extract_benchmark_answer(raw_output, "mathvision", true_answer)
             rows.append(
                 {
                     "item_id": to_text(record.get("item_id", "")),
                     "seed": to_text(record.get("seed", "")),
-                    "true_answer": to_text(record.get("true_answer", "")),
-                    "response": to_text(record.get("response", "")),
+                    "true_answer": true_answer,
+                    "response": response,
                     "thinking_process": to_text(record.get("thinking_process", "")),
-                    "raw_output": to_text(record.get("raw_output", "")),
+                    "raw_output": raw_output,
                     **{field: record.get(field, "") for field in GENERATION_METADATA_FIELDS},
                 }
             )

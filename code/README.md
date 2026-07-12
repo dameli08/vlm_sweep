@@ -7,7 +7,7 @@ Runs vLLM + lmms-eval vision sweeps for the penalty project.
 - Reasoning mode only by default: `RUN_NON_REASON="0"`, `RUN_REASON="1"`.
 - Benchmarks: MMMU-Pro vision, AI2D, and MathVision testmini.
 - Fixed item sets: 250 seeded-random MMMU-Pro rows, 250 seeded-random AI2D rows, and all 304 MathVision testmini rows.
-- Samples per item: k=5 explicit seed runs, configured by `SAMPLE_SEEDS`.
+- Samples per item: k=3 explicit seed runs, configured by `SAMPLE_SEEDS`.
 - Sweeps are separate 1-D sweeps:
   - `repetition_penalty=(1.0 1.05 1.1 1.15 1.2)` with `presence_penalty=0`
   - `presence_penalty=(0 0.5 1.0 1.5 2.0)` with `repetition_penalty=1.0`
@@ -53,6 +53,6 @@ Result rows include per-seed rows and aggregate rows. They also include `model_i
 
 Per-seed rows report accuracy over answered/parseable questions only. Unparseable outputs are counted in `format_failure_count` and excluded from that per-seed accuracy denominator.
 
-Aggregate rows use strict majority vote across the five seeds for each item. Unparseable outputs do not vote, so they can prevent a 3-of-5 majority; items without a correct strict majority count as wrong in aggregate accuracy. In aggregate rows, `answered_questions` is the number of items with a valid strict majority answer.
+Aggregate rows use strict majority vote across the three seeds for each item. Unparseable outputs do not vote, so they can prevent a 2-of-3 majority; items without a correct strict majority count as wrong in aggregate accuracy. In aggregate rows, `answered_questions` is the number of items with a valid strict majority answer.
 
 Note: full top-k token logprobs and entropy metrics are still not collected.

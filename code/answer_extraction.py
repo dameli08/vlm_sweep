@@ -54,7 +54,11 @@ def extract_final_letter_strict(text):
     raw = strip_reasoning_blocks(to_text(text)).strip()
     raw = re.sub(r"</?(think|analysis|answer)>", " ", raw, flags=re.I)
     raw = _strip_channel_tags(raw).strip()
+    boxed = extract_boxed_answer(raw)
+    if re.fullmatch(r"\(?\s*([A-J])\s*\)?", boxed, flags=re.I):
+        return re.fullmatch(r"\(?\s*([A-J])\s*\)?", boxed, flags=re.I).group(1).upper()
     patterns = [
+        r"\\boxed\s*\{\s*\(?\s*([A-J])\s*\)?\s*\}",
         r"^\s*\(?\s*([A-J])\s*\)?\s*[\.)\]:,;!-]*\s*$",
         r"<answer>\s*\(?\s*([A-J])\s*\)?\s*</answer>",
         r"(?:final\s+answer|answer|option|choice|final\s+selection)\s*(?:is|:|=|-)?\s*\(?\s*([A-J])\s*\)?\s*(?:$|[\.)\],:;!])",
