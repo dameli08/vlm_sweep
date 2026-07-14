@@ -280,11 +280,15 @@ def iter_sample_records(out_dir):
     for path in sorted(candidates):
         if path.suffix.lower() == ".jsonl":
             lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            pending = ""
             for line in lines:
+                candidate = line if not pending else pending + "\\n" + line
                 try:
-                    record = json.loads(line)
+                    record = json.loads(candidate)
                 except Exception:
+                    pending = candidate
                     continue
+                pending = ""
                 if isinstance(record, dict):
                     yield record
             continue
@@ -608,7 +612,11 @@ def maybe_append_aggregate(args, answers_root):
         rows = load_answer_file(path)
         if not rows:
             return
-        rows = validate_rows_against_subset(rows, args.benchmark, args.subset_path)
+        try:
+            rows = validate_rows_against_subset(rows, args.benchmark, args.subset_path)
+        except SystemExit as exc:
+            print(f"[WARN] aggregate skipped until all seed answer files are complete: {exc}")
+            return
         metric = evaluate(rows, args.benchmark, skip_format_failures=True)
         seed_metrics.append(metric)
         seed_accuracies.append(metric["accuracy"] if metric["accuracy"] is not None else 0.0)
@@ -644,7 +652,16 @@ def main():
                 raise SystemExit(f"Timed out waiting for answer extraction: {answer_path}")
             time.sleep(1)
         rows = load_answer_file(answer_path)
-        rows = validate_rows_against_subset(rows, args.benchmark, args.subset_path)
+        try:
+            rows = validate_rows_against_subset(rows, args.benchmark, args.subset_path)
+        except SystemExit as exc:
+            rebuilt_rows = collect_rows(out_dir, args.benchmark, args.mode, args.seed)
+            if not rebuilt_rows:
+                raise
+            rebuilt_rows = validate_rows_against_subset(rebuilt_rows, args.benchmark, args.subset_path)
+            answer_path = write_answer_file(rebuilt_rows, answers_root, args.model_name, args.benchmark, args.mode, args.sweep_param, args.sweep_value, args.seed)
+            rows = rebuilt_rows
+            print(f"[WARN] rebuilt incomplete live answer file from lmms samples: {exc}")
     else:
         rows = collect_rows(out_dir, args.benchmark, args.mode, args.seed)
         rows = validate_rows_against_subset(rows, args.benchmark, args.subset_path)

@@ -60,8 +60,10 @@ def extract_final_letter_strict(text):
     patterns = [
         r"\\boxed\s*\{\s*\(?\s*([A-J])\s*\)?\s*\}",
         r"^\s*\(?\s*([A-J])\s*\)?\s*[\.)\]:,;!-]*\s*$",
-        r"<answer>\s*\(?\s*([A-J])\s*\)?\s*</answer>",
-        r"(?:final\s+answer|answer|option|choice|final\s+selection)\s*(?:is|:|=|-)?\s*\(?\s*([A-J])\s*\)?\s*(?:$|[\.)\],:;!])",
+        r"<answer>\s*[*_`\s]*\(?\s*([A-J])\s*\)?\s*[*_`\s]*</answer>",
+        r"(?:final\s+answer|answer|option|choice|final\s+selection)\s*(?:is|:|=|-)?\s*[*_`\s]*\(?\s*([A-J])\s*\)?\s*[*_`\s]*(?:$|[\.)\],:;!])",
+        r"(?:答案|选项|选择|答)\s*(?:是|为|:|：)?\s*[*_`\s]*\(?\s*([A-J])\s*\)?\s*[*_`\s]*(?:$|[\.)\],:;!。]|项)",
+        r"\b([A-J])\s*项",
         r"^\s*([A-J])\s*[\.)\]:-]\s+",
     ]
     for pattern in patterns:
