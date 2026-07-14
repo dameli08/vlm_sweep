@@ -111,8 +111,8 @@ ANSWER_MODEL_NAMES=(
 
 # Leave empty to run every model above. To run a subset, list aliases here, e.g.:
 # SELECTED_MODEL_ALIASES=("qwen3.5-4b" "gemma4-2b")
-SELECTED_MODEL_ALIASES=("qwen3.5-4b" "qwen3.5-9b" "gemma4-2b" "gemma4-4b" "gemma4-12b")
-
+SELECTED_MODEL_ALIASES=( "gemma4-2b" "gemma4-4b" "gemma4-12b")
+# "qwen3.5-4b" "qwen3.5-9b"
 # =========================
 # Sweep values (NO combinations)
 # =========================
