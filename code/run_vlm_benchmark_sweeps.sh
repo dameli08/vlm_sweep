@@ -250,9 +250,10 @@ build_gen_kwargs() {
   local mode="$1"
   local temperature="$2"
   local top_p="$3"
-  local repetition_penalty="$4"
-  local presence_penalty="$5"
-  local sample_seed="$6"
+  local top_k="$4"
+  local repetition_penalty="$5"
+  local presence_penalty="$6"
+  local sample_seed="$7"
   local max_tokens
 
   if [[ "${mode}" == "non_reason" ]]; then
@@ -261,7 +262,7 @@ build_gen_kwargs() {
     max_tokens="${REASON_MAX_NEW_TOKENS:-${MAX_NEW_TOKENS}}"
   fi
 
-  local gen_kwargs="temperature=${temperature},top_p=${top_p},top_k=${TOP_K_VALUE},repetition_penalty=${repetition_penalty},presence_penalty=${presence_penalty},seed=${sample_seed},max_new_tokens=${max_tokens}"
+  local gen_kwargs="temperature=${temperature},top_p=${top_p},top_k=${top_k},repetition_penalty=${repetition_penalty},presence_penalty=${presence_penalty},seed=${sample_seed},max_new_tokens=${max_tokens}"
 
   if [[ "${mode}" == "non_reason" ]]; then
     if [[ -n "${NON_REASON_EXTRA_GEN_KWARGS}" ]]; then
@@ -590,6 +591,7 @@ export_run_artifacts() {
   local model_path="${13}"
   local max_tokens="${14}"
   local thinking_budget="${15}"
+  local top_k="${16}"
   local sample_seed_csv
   sample_seed_csv="$(IFS=,; echo "${SAMPLE_SEEDS[*]}")"
 
@@ -604,7 +606,7 @@ export_run_artifacts() {
     --sweep-value "${sweep_value}" \
     --temperature "${temperature}" \
     --top-p "${top_p}" \
-    --top-k "${TOP_K_VALUE}" \
+    --top-k "${top_k}" \
     --repetition-penalty "${repetition_penalty}" \
     --presence-penalty "${presence_penalty}" \
     --seed "${sample_seed}" \
@@ -664,6 +666,7 @@ run_one_experiment() {
   local presence_penalty="${10}"
   local sample_seed="${11}"
   local model_path="${12}"
+  local top_k="${13}"
   local run_max_tokens
   if [[ "${mode}" == "non_reason" ]]; then
     run_max_tokens="${NON_REASON_MAX_NEW_TOKENS:-${MAX_NEW_TOKENS}}"
@@ -688,11 +691,11 @@ run_one_experiment() {
   model_args="$(build_model_args "${model_alias}" "${mode}" "${benchmark}")"
 
   local gen_kwargs
-  gen_kwargs="$(build_gen_kwargs "${mode}" "${temperature}" "${top_p}" "${repetition_penalty}" "${presence_penalty}" "${sample_seed}")"
+  gen_kwargs="$(build_gen_kwargs "${mode}" "${temperature}" "${top_p}" "${top_k}" "${repetition_penalty}" "${presence_penalty}" "${sample_seed}")"
 
   local live_answers_csv="${out_dir}/answers_live.csv"
   cat >"${live_answers_csv}" <<'CSV'
-benchmark,mode,model_alias,doc_id,true_answer_text,prediction_raw,prediction_clean,raw_response_full,thinking_trace,visible_response,true_letter,predicted_letter,letter_match,match_rule,true_answer_normalized,prediction_normalized,exact_match,resolved_match,finish_reason,request_success,input_tokens,output_tokens,reasoning_tokens
+benchmark,mode,model_alias,doc_id,true_answer_text,prediction_raw,prediction_clean,raw_response_full,thinking_trace,visible_response,true_letter,predicted_letter,letter_match,match_rule,true_answer_normalized,prediction_normalized,exact_match,resolved_match,finish_reason,request_success,input_tokens,output_tokens,reasoning_tokens,first_64_token_logprobs
 CSV
 
   local answer_key
@@ -702,6 +705,13 @@ CSV
   local live_answer_jsonl="${ANSWERS_ROOT}/${answer_model_name}/${answer_key}__${mode}__${sweep_param}_${safe_sweep_value}__seed_${sample_seed}.jsonl"
   LIVE_WRITER_STOP_FILE="${out_dir}/.live_writer_stop"
   rm -f "${LIVE_WRITER_STOP_FILE}"
+  LMMS_SAMPLE_SEED="${sample_seed}" \
+  LMMS_MODEL_ALIAS="${model_alias}" \
+  LMMS_MODEL_PATH="${model_path}" \
+  LMMS_MAX_TOKENS="${run_max_tokens}" \
+  LMMS_THINKING_BUDGET="${thinking_budget}" \
+  LMMS_VLLM_VERSION="${VLLM_VERSION}" \
+  LMMS_HARNESS_GIT_COMMIT="${HARNESS_GIT_COMMIT}" \
   python "${SCRIPT_DIR}/live_answer_writer.py" \
     --csv "${live_answers_csv}" \
     --jsonl "${live_answer_jsonl}" \
@@ -751,7 +761,7 @@ CSV
           "${out_dir}" "${answer_model_name}" "${mode}" "${benchmark}" \
           "${sweep_param}" "${sweep_value}" \
           "${temperature}" "${top_p}" "${repetition_penalty}" "${presence_penalty}" "${sample_seed}" \
-          "${model_alias}" "${model_path}" "${run_max_tokens}" "${thinking_budget}" >>"${run_log}" 2>&1; then
+          "${model_alias}" "${model_path}" "${run_max_tokens}" "${thinking_budget}" "${top_k}" >>"${run_log}" 2>&1; then
         cleanup_run_csvs "${out_dir}"
         touch "${marker_fail}"
         TOTAL_FAIL=$((TOTAL_FAIL + 1))
@@ -771,6 +781,21 @@ CSV
   fi
 
   stop_live_writer
+  if [[ "${EXPORT_ARTIFACTS:-1}" == "1" ]]; then
+    if export_run_artifacts \
+        "${out_dir}" "${answer_model_name}" "${mode}" "${benchmark}" \
+        "${sweep_param}" "${sweep_value}" \
+        "${temperature}" "${top_p}" "${repetition_penalty}" "${presence_penalty}" "${sample_seed}" \
+        "${model_alias}" "${model_path}" "${run_max_tokens}" "${thinking_budget}" "${top_k}" >>"${run_log}" 2>&1; then
+      cleanup_run_csvs "${out_dir}"
+      rm -f "${marker_fail}"
+      touch "${marker_done}"
+      TOTAL_OK=$((TOTAL_OK + 1))
+      log "OK  ${model_alias} | ${mode} | ${benchmark} | ${sweep_param}=${sweep_value} | seed=${sample_seed} (exported after lmms postprocess failure)"
+      return 0
+    fi
+  fi
+
   cleanup_run_csvs "${out_dir}"
   touch "${marker_fail}"
   TOTAL_FAIL=$((TOTAL_FAIL + 1))
@@ -812,20 +837,23 @@ run_sweeps_for_benchmark() {
   local baseline_top_p
   local baseline_repetition_penalty
   local baseline_presence_penalty
+  local baseline_top_k
 
   if [[ "${mode}" == "non_reason" ]]; then
     baseline_temperature="${NON_REASON_BASELINE_TEMPERATURE:-${REASON_BASELINE_TEMPERATURE}}"
     baseline_top_p="${NON_REASON_BASELINE_TOP_P:-${REASON_BASELINE_TOP_P}}"
     baseline_repetition_penalty="${NON_REASON_BASELINE_REPETITION_PENALTY:-${REASON_BASELINE_REPETITION_PENALTY}}"
     baseline_presence_penalty="${NON_REASON_BASELINE_PRESENCE_PENALTY:-${REASON_BASELINE_PRESENCE_PENALTY}}"
+    baseline_top_k="${TOP_K_VALUE_BY_MODEL[$model_alias]:-${TOP_K_VALUE}}"
   else
     baseline_temperature="$(get_reason_baseline_temperature "${model_alias}")"
     baseline_top_p="$(get_reason_baseline_top_p "${model_alias}")"
     baseline_repetition_penalty="$(get_reason_baseline_repetition_penalty "${model_alias}")"
     baseline_presence_penalty="$(get_reason_baseline_presence_penalty "${model_alias}")"
+    baseline_top_k="${TOP_K_VALUE_BY_MODEL[$model_alias]:-${TOP_K_VALUE}}"
   fi
 
-  log "BASELINE ${model_alias} | ${mode} | temp=${baseline_temperature} top_p=${baseline_top_p} repetition_penalty=${baseline_repetition_penalty} presence_penalty=${baseline_presence_penalty}"
+  log "BASELINE ${model_alias} | ${mode} | temp=${baseline_temperature} top_p=${baseline_top_p} top_k=${baseline_top_k} repetition_penalty=${baseline_repetition_penalty} presence_penalty=${baseline_presence_penalty}"
 
   local seed
   local r
@@ -834,7 +862,7 @@ run_sweeps_for_benchmark() {
       run_one_experiment \
         "${model_alias}" "${answer_model_name}" "${mode}" "${benchmark}" \
         "repetition_penalty" "${r}" \
-        "${baseline_temperature}" "${baseline_top_p}" "${r}" "${baseline_presence_penalty}" "${seed}" "${model_path}" || return 1
+        "${baseline_temperature}" "${baseline_top_p}" "${r}" "${baseline_presence_penalty}" "${seed}" "${model_path}" "${baseline_top_k}" || return 1
     done
   done
 
@@ -844,7 +872,7 @@ run_sweeps_for_benchmark() {
       run_one_experiment \
         "${model_alias}" "${answer_model_name}" "${mode}" "${benchmark}" \
         "presence_penalty" "${p}" \
-        "${baseline_temperature}" "${baseline_top_p}" "${baseline_repetition_penalty}" "${p}" "${seed}" "${model_path}" || return 1
+        "${baseline_temperature}" "${baseline_top_p}" "${baseline_repetition_penalty}" "${p}" "${seed}" "${model_path}" "${baseline_top_k}" || return 1
     done
   done
 }
@@ -882,19 +910,40 @@ model_is_selected() {
   return 1
 }
 
+find_model_index() {
+  local alias="$1"
+  local i
+  for i in "${!MODEL_ALIASES[@]}"; do
+    if [[ "${MODEL_ALIASES[$i]}" == "${alias}" ]]; then
+      echo "${i}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 main() {
   log "Results root: ${RUN_ROOT}"
 
+  local model_order=()
   local i
-  for i in "${!MODEL_PATHS[@]}"; do
+  if [[ ${#SELECTED_MODEL_ALIASES[@]} -eq 0 ]]; then
+    model_order=("${!MODEL_PATHS[@]}")
+  else
+    local selected
+    for selected in "${SELECTED_MODEL_ALIASES[@]}"; do
+      if i="$(find_model_index "${selected}")"; then
+        model_order+=("${i}")
+      else
+        log "WARN selected model alias not found: ${selected}"
+      fi
+    done
+  fi
+
+  for i in "${model_order[@]}"; do
     local model_path="${MODEL_PATHS[$i]}"
     local model_alias="${MODEL_ALIASES[$i]}"
     local answer_model_name="${ANSWER_MODEL_NAMES[$i]}"
-
-    if ! model_is_selected "${model_alias}"; then
-      log "SKIP unselected model: ${model_alias}"
-      continue
-    fi
 
     local model_root="${RUN_ROOT}/${model_alias}"
     mkdir -p "${model_root}"

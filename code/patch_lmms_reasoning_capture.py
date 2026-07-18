@@ -409,3 +409,86 @@ if "LMMS_FIXED_SUBSET_PATH" not in task_text:
     print(f"[INFO] Patched fixed subset support: {task_path}")
 else:
     print(f"[INFO] Fixed subset support already patched: {task_path}")
+
+
+# Ensure first-64-token logprobs capture stays installed.
+def patch_first_64_logprobs_capture():
+    openai_spec = importlib.util.find_spec("lmms_eval.models.chat.openai")
+    if openai_spec is None or openai_spec.origin is None:
+        return
+    openai_path = Path(openai_spec.origin)
+    openai_text = openai_path.read_text(encoding="utf-8")
+    if "import json\n" not in openai_text:
+        openai_text = openai_text.replace("import csv\n", "import csv\nimport json\n", 1)
+
+    helper = """
+    def _first_token_logprobs_json(self, response, limit: int = 64) -> str:
+        try:
+            logprobs = getattr(response.choices[0], \"logprobs\", None)
+            content = getattr(logprobs, \"content\", None) or []
+            packed = []
+            for item in content[:limit]:
+                token = getattr(item, \"token\", \"\")
+                logprob = getattr(item, \"logprob\", None)
+                top_items = []
+                for top in (getattr(item, \"top_logprobs\", None) or [])[:5]:
+                    top_items.append({\"token\": getattr(top, \"token\", \"\"), \"logprob\": getattr(top, \"logprob\", None)})
+                packed.append({\"token\": token, \"logprob\": logprob, \"top_logprobs\": top_items})
+            return json.dumps(packed, ensure_ascii=False)
+        except Exception:
+            return \"\"
+
+"""
+    if "def _first_token_logprobs_json" not in openai_text:
+        openai_text = openai_text.replace(
+            "    def _append_live_answer_row(self, row: dict) -> None:\n",
+            helper + "    def _append_live_answer_row(self, row: dict) -> None:\n",
+            1,
+        )
+    if '\"first_64_token_logprobs\",' not in openai_text:
+        openai_text = openai_text.replace(
+            '            "reasoning_tokens",\n        ]\n',
+            '            "reasoning_tokens",\n            "first_64_token_logprobs",\n        ]\n',
+            1,
+        )
+    openai_text = openai_text.replace(
+        'return "", "", local_index, False, False, 0.0, 0, 0, 0, "", 0, 0',
+        'return "", "", local_index, False, False, 0.0, 0, 0, 0, "", 0, 0, ""',
+    )
+    openai_text = openai_text.replace(
+        'return failure_content, failure_content, local_index, False, rate_limited, elapsed, 0, 0, 0, "error", 0, 0',
+        'return failure_content, failure_content, local_index, False, rate_limited, elapsed, 0, 0, 0, "error", 0, 0, ""',
+    )
+    if "first_64_token_logprobs = self._first_token_logprobs_json(response, 64)" not in openai_text:
+        openai_text = openai_text.replace(
+            'finish_reason = getattr(response.choices[0], "finish_reason", "") or ""\n                    response_message = response.choices[0].message',
+            'finish_reason = getattr(response.choices[0], "finish_reason", "") or ""\n                    first_64_token_logprobs = self._first_token_logprobs_json(response, 64)\n                    response_message = response.choices[0].message',
+            1,
+        )
+    openai_text = openai_text.replace(
+        '                        output_tokens,\n                        input_tokens,\n                    )\n',
+        '                        output_tokens,\n                        input_tokens,\n                        first_64_token_logprobs,\n                    )\n',
+        1,
+    )
+    openai_text = openai_text.replace(
+        '                        output_tokens,\n                        input_tokens,\n                    ) = future.result()\n',
+        '                        output_tokens,\n                        input_tokens,\n                        first_64_token_logprobs,\n                    ) = future.result()\n',
+        1,
+    )
+    if 'payload["logprobs"] = True' not in openai_text:
+        openai_text = openai_text.replace(
+            '            if "top_p" in request_gen_kwargs:\n                payload["top_p"] = request_gen_kwargs.get("top_p")\n\n',
+            '            if "top_p" in request_gen_kwargs:\n                payload["top_p"] = request_gen_kwargs.get("top_p")\n\n            payload["logprobs"] = True\n            payload["top_logprobs"] = 5\n\n',
+            1,
+        )
+    if '"first_64_token_logprobs": first_64_token_logprobs,' not in openai_text:
+        openai_text = openai_text.replace(
+            '                            "reasoning_tokens": reasoning_tokens,\n                        }\n',
+            '                            "reasoning_tokens": reasoning_tokens,\n                            "first_64_token_logprobs": first_64_token_logprobs,\n                        }\n',
+            1,
+        )
+    openai_path.write_text(openai_text, encoding="utf-8")
+    print(f"[INFO] Patched first-64-token logprobs capture: {openai_path}")
+
+
+patch_first_64_logprobs_capture()

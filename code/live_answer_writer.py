@@ -98,6 +98,7 @@ def base_metadata(row, thinking, response, raw_response):
         "input_tokens": int(row.get("input_tokens", "0") or 0),
         "output_tokens": int(row.get("output_tokens", "0") or 0),
         "reasoning_tokens": int(row.get("reasoning_tokens", "0") or 0),
+        "first_64_token_logprobs": row.get("first_64_token_logprobs", ""),
     }
 
 

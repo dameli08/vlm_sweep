@@ -50,14 +50,10 @@ REASON_EXTRA_GEN_KWARGS=""
 # =========================
 # Benchmarks
 # =========================
-NON_REASON_BENCHMARKS=(
-  #"mmmu_pro_vision"
-  #"ai2d"
-  "mathvision_reason_testmini"
-)
+
 
 REASON_BENCHMARKS=(
-  #"mathvision_reason_testmini_reasoning"
+  "mathvision_reason_testmini_reasoning"
   "mmmu_pro_vision_cot_reasoning"
   "ai2d_reasoning"
   
@@ -68,6 +64,7 @@ REASON_BENCHMARKS=(
 # =========================
 # Keep these arrays same length and order. Edit paths to match local storage.
 MODEL_PATHS=(
+  "/data/models/Qwen3.5-2B"
   "/data/models/Qwen3.5-4B"
   "/data/models/Qwen3.5-9B"
   "/data/models/Qwen3.5-27B"
@@ -82,6 +79,7 @@ MODEL_PATHS=(
 )
 
 MODEL_ALIASES=(
+  "qwen3.5-2b"
   "qwen3.5-4b"
   "qwen3.5-9b"
   "qwen3.5-27b"
@@ -96,6 +94,7 @@ MODEL_ALIASES=(
 )
 
 ANSWER_MODEL_NAMES=(
+  "qwen3.5_2b"
   "qwen3.5_4b"
   "qwen3.5_9b"
   "qwen3.5_27b"
@@ -111,8 +110,8 @@ ANSWER_MODEL_NAMES=(
 
 # Leave empty to run every model above. To run a subset, list aliases here, e.g.:
 # SELECTED_MODEL_ALIASES=("qwen3.5-4b" "gemma4-2b")
-SELECTED_MODEL_ALIASES=( "qwen3.5-4b" "qwen3.5-9b" "gemma4-2b" "gemma4-4b" "gemma4-12b")
-# "qwen3.5-4b" "qwen3.5-9b"
+SELECTED_MODEL_ALIASES=("gemma4-2b" "qwen3.5-2b" )
+# "qwen3.5-4b" "qwen3.5-9b" "gemma4-12b" "gemma4-4b"
 # =========================
 # Sweep values (NO combinations)
 # =========================
@@ -123,9 +122,26 @@ SAMPLE_SEEDS=(0 1 2)
 SUBSAMPLE_SEED="20260710"
 SUBSAMPLE_SIZE_MMMU_PRO="250"
 SUBSAMPLE_SIZE_AI2D="250"
-SUBSAMPLE_SIZE_MATHVISION=""  # empty means all 304 testmini rows
+SUBSAMPLE_SIZE_MATHVISION="250"
 
 TOP_K_VALUE="20"
+
+# Optional per-model top-k baselines. Keys must match MODEL_ALIASES.
+# If a model alias is not listed, TOP_K_VALUE above is used.
+declare -A TOP_K_VALUE_BY_MODEL=(
+  ["qwen3.5-2b"]="20"
+  ["qwen3.5-4b"]="20"
+  ["qwen3.5-9b"]="20"
+  ["qwen3.5-27b"]="20"
+  ["qwen3.6-27b"]="20"
+  ["qwen3.6-35b"]="20"
+  ["qwen3-omni-30b-a3b-thinking"]="20"
+  ["gemma4-2b"]="64"
+  ["gemma4-4b"]="64"
+  ["gemma4-12b"]="64"
+  ["gemma4-26b"]="64"
+  ["gemma4-32b"]="64"
+)
 
 #NON_REASON_BASELINE_TEMPERATURE="0.8"
 #NON_REASON_BASELINE_TOP_P="0.90"
@@ -140,14 +156,22 @@ REASON_BASELINE_PRESENCE_PENALTY="0"
 # Optional per-model reasoning baselines. Keys must match MODEL_ALIASES.
 # If a model alias is not listed, the global REASON_BASELINE_* values above are used.
 declare -A REASON_BASELINE_TEMPERATURE_BY_MODEL=(
-  ["qwen3.5-4b"]="1.0"
-  ["qwen3.5-9b"]="1.0"
+  ["qwen3.5-2b"]="0.6"
+  ["qwen3.5-4b"]="0.6"
+  ["qwen3.5-9b"]="0.6"
+  ["qwen3.5-27b"]="0.6"
+  ["qwen3.6-27b"]="0.6"
+  ["qwen3.6-35b"]="0.6"
+  ["qwen3-omni-30b-a3b-thinking"]="0.6"
   ["gemma4-2b"]="1.0"
   ["gemma4-4b"]="1.0"
   ["gemma4-12b"]="1.0"
+  ["gemma4-26b"]="1.0"
+  ["gemma4-32b"]="1.0"
 )
 
 declare -A REASON_BASELINE_TOP_P_BY_MODEL=(
+  ["qwen3.5-2b"]="0.95"
   ["qwen3.5-4b"]="0.95"
   ["qwen3.5-9b"]="0.95"
   ["gemma4-2b"]="0.95"
@@ -156,6 +180,7 @@ declare -A REASON_BASELINE_TOP_P_BY_MODEL=(
 )
 
 declare -A REASON_BASELINE_REPETITION_PENALTY_BY_MODEL=(
+  ["qwen3.5-2b"]="1.0"
   ["qwen3.5-4b"]="1.0"
   ["qwen3.5-9b"]="1.0"
   ["gemma4-2b"]="1.0"
@@ -164,6 +189,7 @@ declare -A REASON_BASELINE_REPETITION_PENALTY_BY_MODEL=(
 )
 
 declare -A REASON_BASELINE_PRESENCE_PENALTY_BY_MODEL=(
+  ["qwen3.5-2b"]="0"
   ["qwen3.5-4b"]="0"
   ["qwen3.5-9b"]="0"
   ["gemma4-2b"]="0"

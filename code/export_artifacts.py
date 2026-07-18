@@ -43,6 +43,7 @@ GENERATION_METADATA_FIELDS = (
     "input_tokens",
     "output_tokens",
     "reasoning_tokens",
+    "first_64_token_logprobs",
 )
 
 
@@ -419,6 +420,90 @@ def evaluate(rows, benchmark, skip_format_failures=False):
     }
 
 
+def numeric_value(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def normalized_finish_reason(row):
+    reason = to_text(row.get("finish_reason", "")).strip().lower()
+    if not reason:
+        return "unknown"
+    if reason in {"stop", "length"}:
+        return reason
+    return reason
+
+
+def dataset_metadata_summary(rows, benchmark):
+    total = len(rows)
+    finish_counts = Counter({"stop": 0, "length": 0, "unknown": 0})
+    unanswered_finish_counts = Counter({"stop": 0, "length": 0, "unknown": 0})
+    numeric_fields = (
+        "trace_token_count",
+        "answer_token_count",
+        "loop_score",
+        "input_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+    )
+    values = {field: [] for field in numeric_fields}
+
+    for row in rows:
+        reason = normalized_finish_reason(row)
+        finish_counts[reason] += 1
+        _, failed, _ = score_row(row, benchmark)
+        if failed:
+            unanswered_finish_counts[reason] += 1
+        for field in numeric_fields:
+            value = numeric_value(row.get(field, ""))
+            if value is not None:
+                values[field].append(value)
+
+    unanswered_total = sum(unanswered_finish_counts.values())
+    length_count = finish_counts["length"]
+    loop_count = sum(
+        1 for row in rows
+        if (numeric_value(row.get("loop_score", "")) or 0.0) > 0.0
+    )
+    summary = {
+        "finish_reason_counts": dict(finish_counts),
+        "finish_reason_rates": {
+            reason: (count / total if total else None)
+            for reason, count in finish_counts.items()
+        },
+        "unanswered_finish_reason_counts": dict(unanswered_finish_counts),
+        "length_finish_count": length_count,
+        "length_finish_rate": length_count / total if total else None,
+        "length_among_unanswered_count": unanswered_finish_counts["length"],
+        "length_among_unanswered_rate": (
+            unanswered_finish_counts["length"] / unanswered_total
+            if unanswered_total
+            else None
+        ),
+        "stop_reason_count": finish_counts["stop"],
+        "length_reason_count": length_count,
+        "truncation_count": length_count,
+        "truncation_rate": length_count / total if total else None,
+        "loop_count": loop_count,
+        "loop_rate": loop_count / total if total else None,
+    }
+    for field in numeric_fields:
+        summary[f"avg_{field}"] = (
+            sum(values[field]) / len(values[field])
+            if values[field]
+            else None
+        )
+    return summary
+
+
 def answer_file_path(answers_root, model_name, benchmark, mode, sweep_param, sweep_value, seed):
     model_dir = answers_root / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -506,11 +591,8 @@ def result_base(args, metric, row_type):
         "format_failure_count": metric["format_failure_count"],
         "score_rule": metric["score_rule"],
         "model_id": args.model_id,
-        "model_path": args.model_path,
         "max_tokens": int(args.max_tokens) if str(args.max_tokens).isdigit() else args.max_tokens,
         "thinking_budget": int(args.thinking_budget) if str(args.thinking_budget).isdigit() else args.thinking_budget,
-        "vllm_version": args.vllm_version,
-        "harness_git_commit": args.harness_git_commit,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
     }
 
@@ -623,6 +705,7 @@ def maybe_append_aggregate(args, answers_root):
         all_rows.extend(rows)
     total_metric = aggregate_majority_metric(all_rows, args.benchmark, len(seeds))
     record = result_base(args, total_metric, "aggregate")
+    record.update(dataset_metadata_summary(all_rows, args.benchmark))
     record.update(
         {
             "seeds": seeds,
@@ -668,6 +751,7 @@ def main():
         answer_path = write_answer_file(rows, answers_root, args.model_name, args.benchmark, args.mode, args.sweep_param, args.sweep_value, args.seed)
     metric = evaluate(rows, args.benchmark, skip_format_failures=True)
     record = result_base(args, metric, "seed")
+    record.update(dataset_metadata_summary(rows, args.benchmark))
     record["seed"] = args.seed
     append_jsonl(Path(args.results_jsonl), record)
     maybe_append_aggregate(args, answers_root)
