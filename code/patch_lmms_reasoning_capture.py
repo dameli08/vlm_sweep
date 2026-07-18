@@ -451,14 +451,18 @@ def patch_first_64_logprobs_capture():
             '            "reasoning_tokens",\n            "first_64_token_logprobs",\n        ]\n',
             1,
         )
-    openai_text = openai_text.replace(
-        'return "", "", local_index, False, False, 0.0, 0, 0, 0, "", 0, 0',
-        'return "", "", local_index, False, False, 0.0, 0, 0, 0, "", 0, 0, ""',
-    )
-    openai_text = openai_text.replace(
-        'return failure_content, failure_content, local_index, False, rate_limited, elapsed, 0, 0, 0, "error", 0, 0',
-        'return failure_content, failure_content, local_index, False, rate_limited, elapsed, 0, 0, 0, "error", 0, 0, ""',
-    )
+    if 'return "", "", local_index, False, False, 0.0, 0, 0, 0, "", 0, 0, ""' not in openai_text:
+        openai_text = openai_text.replace(
+            'return "", "", local_index, False, False, 0.0, 0, 0, 0, "", 0, 0',
+            'return "", "", local_index, False, False, 0.0, 0, 0, 0, "", 0, 0, ""',
+            1,
+        )
+    if 'return failure_content, failure_content, local_index, False, rate_limited, elapsed, 0, 0, 0, "error", 0, 0, ""' not in openai_text:
+        openai_text = openai_text.replace(
+            'return failure_content, failure_content, local_index, False, rate_limited, elapsed, 0, 0, 0, "error", 0, 0',
+            'return failure_content, failure_content, local_index, False, rate_limited, elapsed, 0, 0, 0, "error", 0, 0, ""',
+            1,
+        )
     if "first_64_token_logprobs = self._first_token_logprobs_json(response, 64)" not in openai_text:
         openai_text = openai_text.replace(
             'finish_reason = getattr(response.choices[0], "finish_reason", "") or ""\n                    response_message = response.choices[0].message',
